@@ -135,7 +135,7 @@ def test_ai_refuses_to_delete_confirmed_leave(monkeypatch):
                 position="Security", hire_date=date(2026, 1, 1), status="active",
                 basic_salary=Decimal("5000"), daily_hours=Decimal("8"),
             )
-            leave_type = LeaveType(code="annual", name_ar="سنوية", tracks_balance=True, is_paid=True, active=True)
+            leave_type = LeaveType(code="annual", name_ar="سنوية", name_en="Annual", tracks_balance=True, is_paid=True, active=True)
             db.add_all([emp, leave_type])
             db.flush()
             leave = LeaveRecord(

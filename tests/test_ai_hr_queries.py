@@ -169,3 +169,38 @@ def test_router_answers_without_model(monkeypatch):
         assert "حدد الموظف" in text or "أرصدة" in text or "لا توجد"
     finally:
         engine.dispose()
+
+
+def test_employee_profile_query_reads_registered_employee(monkeypatch):
+    engine, factory = _session()
+    try:
+        with factory() as db:
+            dept = Department(name="Reception", active=True)
+            db.add(dept)
+            db.flush()
+            emp = Employee(
+                code="MY-0042", full_name="موظف ملف تجريبي", department_id=dept.id,
+                position="Reception", hire_date=date(2026, 1, 1), status="active",
+                basic_salary=Decimal("5200"), daily_hours=Decimal("8"),
+            )
+            db.add(emp)
+            db.commit()
+        monkeypatch.setattr(queries, "SessionLocal", factory)
+        report = queries.build_employee_report("بيانات الموظف MY-0042")
+        assert len(report["items"]) == 1
+        assert report["items"][0]["code"] == "MY-0042"
+        assert report["items"][0]["basic_salary"] == "5200.00"
+        assert "MY-0042" in queries.format_employee_report_ar(report)
+    finally:
+        engine.dispose()
+
+
+def test_payroll_query_detector_and_missing_month():
+    assert queries.is_payroll_query_request("راتب الموظف MY-0001 لشهر 2026-11")
+    engine, factory = _session()
+    try:
+        queries.SessionLocal = factory
+        report = queries.build_payroll_report("مسير الرواتب 2026-11")
+        assert report["status"] == "not_created"
+    finally:
+        engine.dispose()

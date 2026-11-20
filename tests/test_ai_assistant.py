@@ -1,3 +1,6 @@
+from datetime import date
+from decimal import Decimal
+
 from app.ai_assistant import build_system_prompt, local_fallback_answer
 
 

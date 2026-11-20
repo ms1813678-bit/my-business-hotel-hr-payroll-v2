@@ -69,7 +69,7 @@
   {% endif %}
   <details>
     <summary>تفاصيل خطة التنفيذ</summary>
-    <pre class="ai-plan">{{ pending.plan | tojson(indent=2, ensure_ascii=False) }}</pre>
+    <pre class="ai-plan">{{ pending.plan | tojson(indent=2) }}</pre>
   </details>
   <p class="muted">هذه الخطة محفوظة ببصمة. صلاحيتها محدودة، ولا يمكن إعادة استخدام الموافقة بعد التنفيذ.</p>
   <div class="actions">

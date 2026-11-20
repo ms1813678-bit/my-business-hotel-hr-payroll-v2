@@ -161,7 +161,7 @@ def format_employee_report_ar(report: dict[str, Any]) -> str:
     lines = ["نتيجة البحث في سجل الموظفين.", report.get("note", "")]
     if not report.get("items"):
         lines.append("لم أعثر على موظف مطابق. استخدم كود الموظف MY-0001 أو الاسم المسجل.")
-        return "\\n".join(lines)
+        return "\n".join(lines)
     for item in report["items"]:
         lines.append(
             f"{item['code']} — {item['name']} — {item['status']} — "
@@ -169,7 +169,7 @@ def format_employee_report_ar(report: dict[str, Any]) -> str:
             f"تعيين {item['hire_date']} — أساسي {item['basic_salary']} جنيه — "
             f"{item['daily_hours']} ساعة يوميًا"
         )
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def build_payroll_report(question: str) -> dict[str, Any]:
@@ -213,14 +213,14 @@ def format_payroll_report_ar(report: dict[str, Any]) -> str:
     lines = [f"ملخص مسير الرواتب لشهر {report['month']} — الحالة: {report['status']} — موعد الصرف: {report['pay_date']}."]
     if not report.get("items"):
         lines.append("لا توجد بنود مطابقة للموظف أو الفترة المحددة.")
-        return "\\n".join(lines)
+        return "\n".join(lines)
     for item in report["items"]:
         lines.append(
             f"{item['code']} — {item['name']} — أساسي {item['base_salary']} — "
             f"إضافات {item['bonuses']} — خصومات {item['deductions']} — "
             f"صافي {item['net_pay']} — مدفوع {item['paid']}"
         )
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def is_structured_hr_query(question: str) -> bool:

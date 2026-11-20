@@ -1,15 +1,8 @@
-"""Approval gateway for the local HR AI command agent (Version 2).
+"""Approval gateway for the local HR AI command agent.
 
 The model may prepare a plan, but every state-changing command must pass through
 this gateway. Approval tokens are single-use, hashed at rest, time-limited, and
-bound to the administrator who requested the plan and to the exact plan hash.
-
-Version 2 confirmation contract:
-1. prepare_command builds a plan and returns a structured payload for the UI
-2. UI must display summary + old_values + new_values + risks
-3. Admin must explicitly confirm (token is bound to the plan)
-4. approve_command executes only if the plan hash still matches
-5. Every step is audited
+bound to the administrator who requested the plan.
 """
 from __future__ import annotations
 
@@ -23,7 +16,7 @@ from sqlalchemy import select
 
 from app.ai_agent import build_plan, execute_plan
 from app.db import SessionLocal
-from app.models import AICommandApproval, AIConversationMessage, AuditLog
+from app.models import AICommandApproval, AIConversationMessage, AdminAccount, AuditLog
 
 APPROVAL_TTL_MINUTES = 10
 
@@ -38,6 +31,13 @@ def plan_hash(plan: dict[str, Any]) -> str:
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Normalize database timestamps from SQLite/PostgreSQL to aware UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _memory(actor: str, role: str, content: str) -> None:
@@ -58,23 +58,16 @@ def recent_memory(actor: str, limit: int = 12) -> list[dict[str, str]]:
 
 
 def prepare_command(question: str, actor: str) -> dict[str, Any]:
-    """Build a plan without mutating data. Returns confirmation payload for the UI."""
     history = recent_memory(actor, limit=8)
-    history_text = "\\n".join(f"{item['role']}: {item['content']}" for item in history)
+    history_text = "\n".join(f"{item['role']}: {item['content']}" for item in history)
     planning_question = question
     if history_text:
-        planning_question = (
-            f"السياق السابق للمحادثة (للفهم فقط):\\n{history_text}\\n\\nالأمر الحالي: {question}"
-        )
+        planning_question = f"السياق السابق للمحادثة (للفهم فقط):\\n{history_text}\\n\\nالأمر الحالي: {question}"
     plan = build_plan(planning_question)
     token = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc)
     expires = now + timedelta(minutes=APPROVAL_TTL_MINUTES)
     summary = str(plan.get("summary") or "تم إعداد خطة للتنفيذ بعد الموافقة.")
-    old_values = plan.get("old_values") or {}
-    new_values = plan.get("new_values") or {}
-    risks = plan.get("risks") or []
-
     with SessionLocal.begin() as db:
         db.add(AICommandApproval(
             token_hash=_token_hash(token),
@@ -90,32 +83,23 @@ def prepare_command(question: str, actor: str) -> dict[str, Any]:
             actor=actor,
             action="ai_command_proposed",
             entity_type="ai_command",
-            entity_id=_token_hash(token)[:16],
-            new_value=f"action={plan.get('action')}; plan_hash={plan_hash(plan)[:12]}",
-            reason=summary[:500],
+            entity_id=_token_hash(token),
+            new_value=f"action={plan.get('action')}; plan_hash={plan_hash(plan)}",
+            reason=question,
         ))
     _memory(actor, "user", question)
-    _memory(actor, "assistant", f"خطة معدة: {summary}")
-
+    _memory(actor, "assistant", f"خطة معلقة تحتاج موافقة: {summary}")
     return {
-        "status": "awaiting_confirmation",
-        "confirmation_token": token,
-        "expires_at": expires.isoformat(),
+        "token": token,
+        "plan": plan,
         "summary": summary,
-        "action": plan.get("action"),
-        "old_values": old_values,
-        "new_values": new_values,
-        "risks": risks,
-        "plan_preview": {k: v for k, v in plan.items() if k not in {"old_values", "new_values", "risks"}},
-        "message": (
-            "تم تجهيز العملية. راجع الملخص والبيانات القديمة والجديدة ثم اضغط "
-            "«تأكيد التنفيذ» فقط إذا كنت موافقًا. أي تعديل على الأمر يتطلب تجهيزًا جديدًا."
-        ),
+        "expires_at": expires,
     }
 
 
-def reject_command(token: str, actor: str, reason: str = "رفض من المسؤول") -> str:
+def reject_command(token: str, actor: str, reason: str = "رفض المسؤول العملية.") -> str:
     now = datetime.now(timezone.utc)
+    expired = False
     with SessionLocal.begin() as db:
         approval = db.scalar(
             select(AICommandApproval)
@@ -126,25 +110,31 @@ def reject_command(token: str, actor: str, reason: str = "رفض من المسؤ
             raise ValueError("طلب الموافقة غير موجود.")
         if approval.status != "pending":
             raise ValueError("هذا الطلب لم يعد قابلًا للرفض.")
-        if approval.expires_at <= now:
+        if _as_utc(approval.expires_at) <= now:
             approval.status = "expired"
-            raise ValueError("انتهت صلاحية طلب الموافقة.")
-        approval.status = "rejected"
-        approval.rejected_at = now
-        db.add(AuditLog(
-            actor=actor,
-            action="ai_command_rejected",
-            entity_type="ai_command",
-            entity_id=str(approval.id),
-            reason=reason,
-        ))
+            expired = True
+            db.add(AuditLog(
+                actor=actor, action="ai_command_expired", entity_type="ai_command",
+                entity_id=str(approval.id), reason="انتهت صلاحية طلب الموافقة.",
+            ))
+        else:
+            approval.status = "rejected"
+            approval.rejected_at = now
+            db.add(AuditLog(
+                actor=actor, action="ai_command_rejected", entity_type="ai_command",
+                entity_id=str(approval.id), reason=reason,
+            ))
+    # Raise only after the transaction commits, or the terminal state would roll back.
+    if expired:
+        raise ValueError("انتهت صلاحية طلب الموافقة.")
     _memory(actor, "assistant", "تم رفض العملية ولم يتم تغيير بيانات النظام.")
     return "تم رفض العملية. لم يتم تغيير أي بيانات."
 
 
 def approve_command(token: str, actor: str) -> str:
-    """Execute only after explicit confirmation. Bound to the exact plan hash."""
     now = datetime.now(timezone.utc)
+    plan: dict[str, Any] | None = None
+    terminal_error: str | None = None
     with SessionLocal.begin() as db:
         approval = db.scalar(
             select(AICommandApproval)
@@ -155,64 +145,74 @@ def approve_command(token: str, actor: str) -> str:
             raise ValueError("طلب الموافقة غير موجود.")
         if approval.status != "pending":
             raise ValueError("هذا الطلب سبق التعامل معه ولا يمكن تنفيذه مرة أخرى.")
-        if approval.expires_at <= now:
+        if _as_utc(approval.expires_at) <= now:
             approval.status = "expired"
             db.add(AuditLog(
-                actor=actor,
-                action="ai_command_expired",
-                entity_type="ai_command",
-                entity_id=str(approval.id),
-                reason="انتهت صلاحية طلب الموافقة.",
+                actor=actor, action="ai_command_expired", entity_type="ai_command",
+                entity_id=str(approval.id), reason="انتهت صلاحية طلب الموافقة.",
             ))
-            raise ValueError("انتهت صلاحية طلب الموافقة.")
-        plan = json.loads(approval.plan_json)
-        if plan_hash(plan) != approval.plan_hash:
-            approval.status = "invalidated"
-            raise ValueError("خطة التنفيذ لم تعد مطابقة للخطة التي تم عرضها.")
-        approval.status = "executing"
-        approval.approved_at = now
-        db.add(AuditLog(
-            actor=actor,
-            action="ai_command_approved",
-            entity_type="ai_command",
-            entity_id=str(approval.id),
-            new_value=f"plan_hash={approval.plan_hash}",
-            reason="موافقة صريحة من مسؤول الموارد البشرية.",
-        ))
-
+            terminal_error = "انتهت صلاحية طلب الموافقة."
+        else:
+            try:
+                candidate = json.loads(approval.plan_json)
+                if not isinstance(candidate, dict):
+                    raise ValueError("stored plan is not a JSON object")
+                candidate_hash = plan_hash(candidate)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                candidate = None
+                candidate_hash = None
+            if candidate is None or candidate_hash != approval.plan_hash:
+                approval.status = "invalidated"
+                db.add(AuditLog(
+                    actor=actor, action="ai_command_invalidated", entity_type="ai_command",
+                    entity_id=str(approval.id),
+                    reason="خطة التنفيذ المخزنة غير صالحة أو لم تعد مطابقة للخطة المعروضة.",
+                ))
+                terminal_error = "خطة التنفيذ لم تعد مطابقة للخطة التي تم عرضها."
+            else:
+                plan = candidate
+                approval.status = "executing"
+                approval.approved_at = now
+                db.add(AuditLog(
+                    actor=actor, action="ai_command_approved", entity_type="ai_command",
+                    entity_id=str(approval.id), new_value=f"plan_hash={approval.plan_hash}",
+                    reason="موافقة صريحة من مسؤول الموارد البشرية.",
+                ))
+    # Persist expired/invalidated states before surfacing the corresponding error.
+    if terminal_error is not None:
+        raise ValueError(terminal_error)
+    if plan is None:
+        raise RuntimeError("لم يتم تجهيز خطة تنفيذ صالحة بعد الموافقة.")
     try:
         message = execute_plan(plan, actor)
     except Exception as exc:
         with SessionLocal.begin() as db:
             approval = db.scalar(
-                select(AICommandApproval).where(AICommandApproval.token_hash == _token_hash(token))
+                select(AICommandApproval)
+                .where(AICommandApproval.token_hash == _token_hash(token))
+                .with_for_update()
             )
-            if approval is not None:
+            if approval is not None and approval.status == "executing":
                 approval.status = "failed"
                 approval.failure_reason = str(exc)[:2000]
                 db.add(AuditLog(
-                    actor=actor,
-                    action="ai_command_failed",
-                    entity_type="ai_command",
-                    entity_id=str(approval.id),
-                    reason=str(exc)[:2000],
+                    actor=actor, action="ai_command_failed", entity_type="ai_command",
+                    entity_id=str(approval.id), reason=str(exc)[:2000],
                 ))
         raise
-
     with SessionLocal.begin() as db:
         approval = db.scalar(
-            select(AICommandApproval).where(AICommandApproval.token_hash == _token_hash(token))
+            select(AICommandApproval)
+            .where(AICommandApproval.token_hash == _token_hash(token))
+            .with_for_update()
         )
         if approval is None or approval.status != "executing":
             raise RuntimeError("حالة الموافقة غير صالحة بعد التنفيذ.")
         approval.status = "consumed"
         approval.consumed_at = datetime.now(timezone.utc)
         db.add(AuditLog(
-            actor=actor,
-            action="ai_command_executed",
-            entity_type="ai_command",
-            entity_id=str(approval.id),
-            new_value=f"plan_hash={approval.plan_hash}",
+            actor=actor, action="ai_command_executed", entity_type="ai_command",
+            entity_id=str(approval.id), new_value=f"plan_hash={approval.plan_hash}",
             reason=message,
         ))
     _memory(actor, "assistant", message)

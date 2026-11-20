@@ -13,94 +13,146 @@ from typing import Any
 from urllib import error, request
 
 OLLAMA_BASE_URL = os.getenv("LOCAL_AI_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_MODEL = os.getenv("LOCAL_AI_MODEL", "llama3.2")
+OLLAMA_MODEL = os.getenv("LOCAL_AI_MODEL", "qwen2.5:3b")
+
+def _ensure_loopback() -> None:
+    host = urlparse(OLLAMA_BASE_URL).hostname
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise RuntimeError("الاتصال بالنموذج مسموح فقط على الجهاز المحلي.")
+
+TIMEOUT_SECONDS = 1.5
 
 
-def _is_loopback(url: str) -> bool:
-    try:
-        parsed = urlparse(url)
-        host = (parsed.hostname or "").lower()
-        return host in {"127.0.0.1", "localhost", "::1"}
-    except Exception:
-        return False
-
-
-def local_model_status() -> dict[str, Any]:
-    if not _is_loopback(OLLAMA_BASE_URL):
-        return {
-            "available": False,
-            "message": "المساعد المحلي متاح فقط على عنوان محلي (localhost).",
-        }
-    try:
-        req = request.Request(f"{OLLAMA_BASE_URL}/api/tags", method="GET")
-        with request.urlopen(req, timeout=2) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        models = [m.get("name", "") for m in data.get("models", [])]
-        if not any(OLLAMA_MODEL in m for m in models):
-            return {
-                "available": False,
-                "message": f"النموذج {OLLAMA_MODEL} غير موجود محليًا. قم بتثبيته عبر Ollama.",
-            }
-        return {"available": True, "message": "المساعد المحلي جاهز.", "model": OLLAMA_MODEL}
-    except Exception as exc:
-        return {
-            "available": False,
-            "message": f"المساعد المحلي غير متاح حالياً: {exc}",
-        }
-
-
-def _post_json(path: str, payload: dict[str, Any], timeout: int = 120) -> dict[str, Any]:
-    if not _is_loopback(OLLAMA_BASE_URL):
-        raise RuntimeError("Local AI endpoint must be loopback only.")
-    body = json.dumps(payload).encode("utf-8")
+def _post_json(path: str, payload: dict[str, Any], timeout: float = TIMEOUT_SECONDS) -> dict[str, Any]:
+    _ensure_loopback()
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = request.Request(
         f"{OLLAMA_BASE_URL}{path}",
         data=body,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+    with request.urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def local_model_status() -> dict[str, Any]:
     try:
-        with request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except error.URLError as exc:
-        raise RuntimeError(f"فشل الاتصال بالنموذج المحلي: {exc}") from exc
+        _ensure_loopback()
+    except RuntimeError as exc:
+        return {"available": False, "server": False, "model": OLLAMA_MODEL, "message": str(exc)}
+    """Return availability without ever contacting a remote service."""
+    req = request.Request(f"{OLLAMA_BASE_URL}/api/tags", method="GET")
+    try:
+        with request.urlopen(req, timeout=0.8) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        names = {str(item.get("name", "")) for item in data.get("models", [])}
+        installed = OLLAMA_MODEL in names or any(name.startswith(f"{OLLAMA_MODEL}:") for name in names)
+        return {
+            "available": installed,
+            "server": True,
+            "model": OLLAMA_MODEL,
+            "message": "المساعد المحلي جاهز." if installed else "خادم الذكاء المحلي يعمل، لكن النموذج المطلوب غير مثبت.",
+        }
+    except (OSError, ValueError, error.URLError):
+        return {
+            "available": False,
+            "server": False,
+            "model": OLLAMA_MODEL,
+            "message": "المساعد المحلي غير متاح حاليًا. النظام الأساسي يعمل بشكل طبيعي.",
+        }
 
 
-def ask_local_model(prompt: str, system: str | None = None) -> str:
+def build_system_prompt() -> str:
+    return (
+        "أنت مساعد موارد بشرية محلي لنظام M.Y. Business Hotel. "
+        "أجب بالعربية الواضحة وباختصار. استخدم البيانات التي يرسلها النظام فقط. "
+        "لا تخترع بيانات أو أرقامًا. لا تعتمد راتبًا أو إجازة أو حضورًا أو سلفة، "
+        "ولا تنفذ أي تغيير؛ أنت مساعد تحليلي فقط. إذا كانت البيانات ناقصة فاذكر ذلك. "
+        "عند اقتراح إجراء مؤثر، اعرضه كاقتراح يحتاج مراجعة وتأكيد مسؤول الموارد البشرية."
+    )
+
+
+def ask_local_model(question: str, context: dict[str, Any]) -> str:
+    """Ask the configured local model; raises RuntimeError when unavailable."""
+    from app.security_roster_compare import (
+        answer_security_roster_comparison,
+        is_security_comparison_request,
+    )
+    from app.ai_hr_queries import answer_structured_hr_query, is_structured_hr_query
+    if is_security_comparison_request(question):
+        # Deterministic review report; does not mutate attendance or payroll.
+        return answer_security_roster_comparison(question)
+    if is_structured_hr_query(question):
+        return answer_structured_hr_query(question)
     status = local_model_status()
     if not status["available"]:
         raise RuntimeError(status["message"])
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-    data = _post_json(
+    response = _post_json(
         "/api/chat",
         {
             "model": OLLAMA_MODEL,
-            "messages": messages,
             "stream": False,
-            "options": {"temperature": 0.1},
+            "messages": [
+                {"role": "system", "content": build_system_prompt()},
+                {
+                    "role": "user",
+                    "content": (
+                        f"سؤال المسؤول: {question.strip()}\n\n"
+                        f"بيانات النظام الحالية (للقراءة فقط): {json.dumps(context, ensure_ascii=False)}"
+                    ),
+                },
+            ],
         },
+        timeout=30,
     )
-    content = data.get("message", {}).get("content") or data.get("response") or ""
-    if not content:
-        raise RuntimeError("النموذج المحلي لم يُرجع محتوى.")
-    return content.strip()
+    answer = str(response.get("message", {}).get("content", "")).strip()
+    if not answer:
+        raise RuntimeError("لم يُرجع النموذج المحلي إجابة.")
+    return answer
 
 
-def ask_local_model_json(prompt: str, system: str | None = None) -> dict[str, Any]:
-    raw = ask_local_model(prompt, system=system)
-    # Strip markdown fences if the model adds them
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.splitlines()
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        cleaned = "\n".join(lines).strip()
+def local_fallback_answer(question: str, context: dict[str, Any]) -> str:
+    """Provide useful deterministic help even when no model is installed."""
+    from app.security_roster_compare import (
+        answer_security_roster_comparison,
+        is_security_comparison_request,
+    )
+    from app.ai_hr_queries import answer_structured_hr_query, is_structured_hr_query
+    if is_security_comparison_request(question):
+        return answer_security_roster_comparison(question)
+    if is_structured_hr_query(question):
+        return answer_structured_hr_query(question)
+    q = " ".join(question.casefold().split())
+    metrics = context.get("metrics", {})
+    if any(term in q for term in ("عدد الموظفين", "الموظفين النشطين", "الموظفون النشطون")):
+        return f"عدد الموظفين النشطين حاليًا: {metrics.get('active_employees', 0)}."
+    if "الحضور" in q and ("مراجعة" in q or "مشكلة" in q):
+        return f"عدد سجلات الحضور التي تحتاج مراجعة حاليًا: {metrics.get('attendance_review', 0)}."
+    if "الرواتب" in q and ("مفتوح" in q or "مسير" in q):
+        return f"عدد مسيرات الرواتب المفتوحة أو المعاد فتحها: {metrics.get('payroll_drafts', 0)}."
+    return (
+        "المساعد الذكي المحلي غير متاح حاليًا لأن النموذج المحلي غير مثبت أو غير مشغّل. "
+        "يمكنك استخدام النظام كاملًا بشكل طبيعي. بعد تشغيل النموذج المحلي سأتمكن من تحليل السؤال "
+        "باستخدام بيانات النظام المعروضة للمساعد، دون حفظ أي تغيير تلقائي."
+    )
+
+
+def ask_local_model_json(system_prompt: str, user_prompt: str) -> dict[str, Any]:
+    status = local_model_status()
+    if not status["available"]:
+        raise RuntimeError(status["message"])
+    response = _post_json(
+        "/api/chat",
+        {"model": OLLAMA_MODEL, "stream": False, "format": "json",
+         "messages": [{"role": "system", "content": system_prompt},
+                      {"role": "user", "content": user_prompt}]},
+        timeout=30,
+    )
+    raw = str(response.get("message", {}).get("content", "")).strip()
+    if not raw:
+        raise RuntimeError("لم يُرجع النموذج المحلي خطة أمر.")
     try:
-        return json.loads(cleaned)
+        return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError("النموذج المحلي لم يُرجع JSON صالحًا.") from exc

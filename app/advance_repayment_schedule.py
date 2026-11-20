@@ -1,45 +1,59 @@
-"""Helpers for building installment schedules for salary advances."""
-from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+"""Deterministic repayment schedule calculations for salary advances.
+
+This module is deliberately schema-independent. Persistence and payroll consumption
+must be integrated by the owning shared-schema/payroll workstreams.
+"""
 from calendar import monthrange
+from datetime import date
+from decimal import Decimal
+
 
 CENT = Decimal("0.01")
 
 
-def money(v: Decimal) -> Decimal:
-    return v.quantize(CENT, rounding=ROUND_HALF_UP)
+def _add_months(value: date, months: int) -> date:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, monthrange(year, month)[1])
+    return date(year, month, day)
 
 
-def build_installment_schedule(
-    total_amount: Decimal,
-    installment_count: int,
-    first_payroll_month: date,
-) -> list[dict]:
+def build_repayment_schedule(
+    amount: Decimal,
+    request_date: date,
+    installment_count: int = 1,
+) -> list[dict[str, date | Decimal]]:
+    """Build payroll-month installments, each paid on the 5th of the next month.
+
+    A request dated 15 September therefore has its first payroll month in
+    September and first deduction/pay date on 5 October.
+    """
+    amount = Decimal(str(amount)).quantize(CENT)
+    if amount <= 0:
+        raise ValueError("Advance amount must be positive.")
+    if not isinstance(installment_count, int) or isinstance(installment_count, bool):
+        raise ValueError("Installment count must be a whole number.")
     if installment_count < 1 or installment_count > 36:
-        raise ValueError("عدد الأقساط يجب أن يكون بين 1 و 36.")
-    if total_amount <= 0:
-        raise ValueError("مبلغ السلفة يجب أن يكون موجبًا.")
+        raise ValueError("Installment count must be between 1 and 36.")
 
-    base = money(total_amount / Decimal(installment_count))
+    total_cents = int((amount / CENT).to_integral_exact())
+    base_cents, remainder_cents = divmod(total_cents, installment_count)
+    if installment_count > total_cents:
+        raise ValueError("Installment count cannot exceed the number of available cents.")
+
     schedule = []
-    remaining = total_amount
-    year, month = first_payroll_month.year, first_payroll_month.month
+    payroll_month = date(request_date.year, request_date.month, 1)
 
-    for i in range(1, installment_count + 1):
-        if i == installment_count:
-            amount = money(remaining)
-        else:
-            amount = base
-            remaining -= amount
+    for index in range(installment_count):
+        cents = base_cents + (1 if index < remainder_cents else 0)
+        pay_month = _add_months(payroll_month, 1)
         schedule.append({
-            "installment_number": i,
-            "amount": amount,
-            "payroll_month": date(year, month, 1),
-            "status": "scheduled",
+            "installment_number": index + 1,
+            "payroll_month": payroll_month,
+            "pay_date": date(pay_month.year, pay_month.month, 5),
+            "amount": (Decimal(cents) * CENT).quantize(CENT),
         })
-        # next month
-        month += 1
-        if month > 12:
-            month = 1
-            year += 1
+        payroll_month = _add_months(payroll_month, 1)
+
     return schedule

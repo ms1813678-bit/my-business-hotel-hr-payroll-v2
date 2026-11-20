@@ -1,44 +1,43 @@
-# M.Y. Business Hotel HR & Payroll — Version 2 Status
+# Version 2 — Engineering status
 
-## Repository
-https://github.com/ms1813678-bit/my-business-hotel-hr-payroll-v2
+Updated: 2026-11-20
 
-## Goal
-Independent, production-oriented Version 2 with:
-- Unified executive intelligent assistant (prepare → show old/new → explicit confirm → execute → audit)
-- Full Arabic / English / Simplified Chinese
-- Local PostgreSQL only
-- All hotel business rules preserved
-- Single HR Admin account
+## Repository and isolation
+- Repository: https://github.com/ms1813678-bit/my-business-hotel-hr-payroll-v2
+- Integration branch: `v2/integration-baseline-2026-11-20`
+- Previous source repository is reference-only; no writes are made there.
+- Imported baseline source: `ms1813678-bit/my-business-hotel-hr-payroll-system`, branch `feature/bilingual-ui-rtl-ltr`, commit `2f1d26bf81e9e3c68fe26103f1f2718be84facce`.
+- Imported application, migrations, workflows, UI templates, Windows scripts, and tests as a starting baseline. The V2 README and this status document remain V2-specific.
 
-## What is already in this repository
-- Project foundation (pyproject 2.0.0, config, db, security, auth, CSRF, employee codes, payroll math)
-- Local AI assistant (Ollama-compatible, loopback only)
-- Leave workflow (create / confirm / cancel / balance adjustments)
-- Advance repayment schedule helpers
-- Annotated confirmation gateway design
+## Important status qualification
+This is an integration baseline, not a completed or production-accepted Version 2. The code has not yet been installed or executed on the hotel's Windows computer. CI must run against this V2 branch and the results must be inspected.
 
-## Next commits (in progress, no pause)
-1. Full models.py
-2. Full ai_agent.py + enhanced prepare summary (old vs new values)
-3. Full ai_gateway.py
-4. Attendance, payroll, security roster workflows
-5. Templates + multi-language shell
-6. Alembic migrations
-7. Windows install scripts
-8. Tests
+## Confirmed source capabilities found during review
+- One administrator authentication, session security, CSRF, audit history.
+- Employee lifecycle, non-reusable codes, service periods and change history.
+- Attendance imports, source retention, reconciliation, review and approval.
+- Security roster import/review and coverage checks.
+- Leave balance transaction history.
+- Regular and installment advances with payroll linkage.
+- Manual rewards/sanctions, payroll runs, overtime approval, payment ledger, close/reopen.
+- Local reports, backup/restore workflows, Windows setup scripts.
+- Local-only AI assistant with a token-bound approval gateway and HR query module.
+- Arabic/English/Simplified Chinese translation catalog and RTL/LTR direction handling in the imported UI baseline.
 
-## Confirmation flow (required behaviour)
-1. Admin writes natural language command.
-2. Assistant builds a plan (no DB mutation yet).
-3. System shows:
-   - Summary in Arabic
-   - Action type
-   - Old values vs new values
-   - Potential risks
-4. Admin must click explicit "تأكيد التنفيذ" (token-bound).
-5. Only then execute + write immutable audit log.
-6. Previous confirmation tokens cannot be reused for a different plan.
+## V2 work still required
+1. Run CI on this repository and repair any import/integration regressions.
+2. Review every model, migration, route and business rule against the V2 brief.
+3. Expand the assistant's cross-module read tools and complete missing write operations (including safe deletion/cancellation where valid).
+4. Validate old/new preview values against the actual database immediately before confirmation; reject stale or altered plans.
+5. Confirm assistant writes all use existing domain workflows and have complete audit records.
+6. Add/verify Chinese translation coverage across all pages and forms.
+7. Verify the exact security roster rule: count active registered guards, not daily attendance count; minimum two assigned to work and complete 24-hour coverage.
+8. Verify advances, payroll snapshots, installment apply/reverse/cancel lifecycle and reopening.
+9. Verify local backup/restore and Windows 10/11 setup on a real test machine.
+10. Complete the Arabic acceptance checklist with synthetic data and record every unrun test honestly.
 
-## Privacy
-No employee or salary data is ever sent to external AI services.
+## Safety
+- Never use real employee/payroll data before owner acceptance.
+- Never send employee or payroll data to a remote model or service.
+- No sensitive mutation without explicit, single-use confirmation by the HR administrator.
+- No cloud hosting, inventory, purchasing, employee accounts, GPS or employee attendance app.

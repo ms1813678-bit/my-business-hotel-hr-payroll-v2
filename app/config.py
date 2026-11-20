@@ -1,21 +1,15 @@
 from pydantic import model_validator
+from sqlalchemy.engine import make_url
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "M.Y. Business Hotel HR V2"
+    app_name: str = "M.Y. Business Hotel HR"
     app_env: str = "development"
     app_host: str = "127.0.0.1"
     app_port: int = 8000
     database_url: str
     session_secret: str
-
-    report_email_to: str = ""
-    report_smtp_host: str = ""
-    report_smtp_port: int = 587
-    report_smtp_username: str = ""
-    report_smtp_password: str = ""
-    report_smtp_starttls: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -26,6 +20,15 @@ class Settings(BaseSettings):
             raise ValueError("DATABASE_URL must be explicitly configured; CHANGE_ME placeholders are forbidden.")
         if not url.startswith("postgresql+psycopg://"):
             raise ValueError("DATABASE_URL must use the installed PostgreSQL psycopg driver.")
+        try:
+            database_host = make_url(url).host
+        except Exception as exc:
+            raise ValueError("DATABASE_URL is not a valid PostgreSQL connection URL.") from exc
+        if (database_host or "").casefold() not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError(
+                "DATABASE_URL must connect to PostgreSQL on this computer only "
+                "(localhost, 127.0.0.1, or ::1)."
+            )
         self.database_url = url
         secret = self.session_secret.strip()
         if len(secret) < 32 or secret == "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET" or secret.lower().startswith("change_me"):

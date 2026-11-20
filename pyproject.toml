@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "my-business-hotel-hr-v2"
-version = "2.0.0"
-description = "M.Y. Business Hotel HR & Payroll System — Version 2. Local-first, multi-language, intelligent assistant."
+name = "my-business-hotel-hr"
+version = "0.1.0"
+description = "Local-first HR and payroll system for M.Y. Business Hotel"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1",

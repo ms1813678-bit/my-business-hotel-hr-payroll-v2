@@ -381,6 +381,9 @@ def ai_ask(
                 "token": result["token"],
                 "summary": result["summary"],
                 "plan": result["plan"],
+                "old_values": result.get("old_values", {}),
+                "new_values": result.get("new_values", {}),
+                "risks": result.get("risks", []),
                 "expires_at": result["expires_at"].isoformat(),
             }
             answer = "تم إعداد خطة التنفيذ. لن يتم أي تعديل قبل موافقتك الصريحة."

@@ -154,9 +154,13 @@ def test_advance_and_staff_action_reports(monkeypatch):
         adv = queries.build_advance_report("سلف MY-0003")
         assert adv["items"]
         assert adv["items"][0]["remaining_installments"] == 2
+        # A specific but unknown employee must not fall back to everyone else's data.
+        assert queries.build_advance_report("سلف MY-9999")["items"] == []
+        assert queries.build_advance_report("سلف الموظفين")["items"]
         staff = queries.build_staff_actions_report("جزاءات 2026-11")
         assert staff["items"]
         assert staff["items"][0]["kind"] == "sanction"
+        assert queries.build_staff_actions_report("جزاءات MY-9999 2026-11")["items"] == []
     finally:
         engine.dispose()
 
@@ -204,3 +208,10 @@ def test_payroll_query_detector_and_missing_month(monkeypatch):
         assert report["status"] == "not_created"
     finally:
         engine.dispose()
+
+
+def test_employee_filter_detector_distinguishes_singular_from_plural():
+    assert queries._employee_filter_requested("راتب الموظف MY-9999")
+    assert queries._employee_filter_requested("سلف الموظف أحمد")
+    assert not queries._employee_filter_requested("سلف الموظفين")
+    assert not queries._employee_filter_requested("جزاءات الموظفين لشهر 2026-11")

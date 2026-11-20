@@ -58,8 +58,19 @@ def _month_end(month_start: date) -> date:
     return date(month_start.year, month_start.month + 1, 1) - timedelta(days=1)
 
 
+def _employee_filter_requested(question: str) -> bool:
+    """True only when the user names a specific employee, not a plural group."""
+    q = " ".join((question or "").casefold().split())
+    if _CODE_RE.search(q):
+        return True
+    return bool(re.search(
+        r"(?:للموظف|الموظف|موظف|للحارس|الحارس|حارس)\s+\S",
+        q,
+    ))
+
+
 def _find_employees(db, question: str) -> list[Employee]:
-    """Resolve employees by code or name fragment mentioned in the question."""
+    """Resolve employees by code or an explicit singular name reference."""
     code_match = _CODE_RE.search(question or "")
     if code_match:
         raw = re.sub(r"\s+", "", code_match.group(1)).upper()
@@ -67,26 +78,23 @@ def _find_employees(db, question: str) -> list[Employee]:
             raw = "MY-" + raw[2:]
         if raw.startswith("SEC") and not raw.startswith("SEC-"):
             raw = "SEC-" + raw[3:]
-        rows = db.scalars(select(Employee).where(Employee.code == raw)).all()
-        if rows:
-            return list(rows)
+        return list(db.scalars(select(Employee).where(Employee.code == raw)).all())
 
-    q = question or ""
-    name_hint = None
-    for marker in ("للموظف", "موظف", "اسم", "للحارس", "حارس"):
-        if marker in q:
-            tail = q.split(marker, 1)[1].strip(" :：-")
-            tail = re.split(r"\d{4}-\d{2}", tail)[0].strip(" ؟?.,")
-            if tail and len(tail) >= 2:
-                name_hint = tail
-                break
-    if name_hint:
-        rows = db.scalars(
-            select(Employee).where(Employee.full_name.ilike(f"%{name_hint}%")).limit(5)
-        ).all()
-        if rows:
-            return list(rows)
-    return []
+    q = " ".join((question or "").split())
+    match = re.search(
+        r"(?:للموظف|الموظف|موظف|للحارس|الحارس|حارس)\s+(.+)",
+        q,
+    )
+    if not match:
+        return []
+    tail = match.group(1).strip(" :：-")
+    tail = re.split(r"\d{4}-\d{2}", tail)[0].strip(" ؟?.,")
+    if not tail or len(tail) < 2:
+        return []
+    rows = db.scalars(
+        select(Employee).where(Employee.full_name.ilike(f"%{tail}%")).limit(5)
+    ).all()
+    return list(rows)
 
 
 def is_attendance_analysis_request(question: str) -> bool:
@@ -180,6 +188,12 @@ def build_payroll_report(question: str) -> dict[str, Any]:
             return {"month": month.isoformat(), "status": "not_created", "items": []}
         employees = _find_employees(db, question)
         employee_ids = {employee.id for employee in employees}
+        if _employee_filter_requested(question) and not employee_ids:
+            return {
+                "month": month.isoformat(), "status": run.status,
+                "pay_date": run.pay_date.isoformat(), "items": [],
+                "note": "لم يتم العثور على الموظف المحدد؛ لم يتم عرض بيانات موظفين آخرين.",
+            }
         query = select(PayrollItem).where(PayrollItem.payroll_run_id == run.id)
         if employee_ids:
             query = query.where(PayrollItem.employee_id.in_(employee_ids))
@@ -372,6 +386,11 @@ def format_leave_balance_ar(report: dict[str, Any]) -> str:
 def build_advance_report(question: str) -> dict[str, Any]:
     with SessionLocal() as db:
         employees = _find_employees(db, question)
+        if _employee_filter_requested(question) and not employees:
+            return {
+                "items": [],
+                "note": "لم يتم العثور على الموظف المحدد؛ لم يتم عرض بيانات موظفين آخرين.",
+            }
         query = select(AdvanceRequest, Employee).join(
             Employee, Employee.id == AdvanceRequest.employee_id
         ).where(AdvanceRequest.status.in_(["pending", "approved", "paid"]))
@@ -426,6 +445,11 @@ def build_staff_actions_report(question: str) -> dict[str, Any]:
     month_end = _month_end(month_start)
     with SessionLocal() as db:
         employees = _find_employees(db, question)
+        if _employee_filter_requested(question) and not employees:
+            return {
+                "month": month_start.isoformat()[:7], "items": [],
+                "note": "لم يتم العثور على الموظف المحدد؛ لم يتم عرض بيانات موظفين آخرين.",
+            }
         query = select(StaffAction, Employee).join(
             Employee, Employee.id == StaffAction.employee_id
         )

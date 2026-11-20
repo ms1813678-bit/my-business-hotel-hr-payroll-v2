@@ -16,7 +16,11 @@ from sqlalchemy import select
 
 from app.ai_agent import build_plan, execute_plan
 from app.db import SessionLocal
-from app.models import AICommandApproval, AIConversationMessage, AdminAccount, AuditLog
+from app.models import (
+    AICommandApproval, AIConversationMessage, AdminAccount, AuditLog,
+    Employee, Department, Branch, LeaveRecord, LeaveType, AdvanceRequest,
+    StaffAction, AttendanceDailyRecord, AttendanceMonth, PayrollRun,
+)
 
 APPROVAL_TTL_MINUTES = 10
 
@@ -31,6 +35,169 @@ def plan_hash(plan: dict[str, Any]) -> str:
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _display_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def build_confirmation_preview(plan: dict[str, Any]) -> dict[str, Any]:
+    """Read current database values and build an operation-specific before/after preview."""
+    action = str(plan.get("action") or "")
+    old: dict[str, Any] = {}
+    new_values: dict[str, Any] = {}
+    snapshot: dict[str, Any] = {"action": action, "target": None, "current": {}}
+    risks: list[str] = []
+
+    with SessionLocal() as db:
+        if action in {"create_employee", "edit_employee", "transfer_employee", "archive_employee", "rehire_employee"}:
+            employee_id = plan.get("employee_id")
+            if employee_id is not None:
+                employee = db.scalar(select(Employee).where(Employee.id == int(employee_id)).with_for_update())
+                if employee is None:
+                    raise ValueError("الموظف المستهدف غير موجود عند تجهيز المعاينة.")
+                fields = ("code", "full_name", "status", "department_id", "branch_id", "position",
+                          "hire_date", "basic_salary", "daily_hours", "phone", "address",
+                          "national_id", "fingerprint_id")
+                old = {key: _display_value(getattr(employee, key)) for key in fields}
+                snapshot = {"action": action, "target": {"type": "employee", "id": employee.id},
+                            "current": old}
+            if action == "create_employee":
+                keys = ("full_name", "position", "department_id", "branch_id", "hire_date",
+                        "basic_salary", "daily_hours", "phone", "address", "national_id", "fingerprint_id")
+                new_values = {key: _display_value(plan[key]) for key in keys if key in plan}
+                risks.append("سيتم إنشاء سجل وظيفي جديد وتخصيص كود موظف لا يُعاد استخدامه.")
+            elif action == "edit_employee":
+                keys = ("full_name", "position", "department_id", "branch_id", "basic_salary",
+                        "daily_hours", "phone", "address", "national_id", "fingerprint_id", "effective_date")
+                new_values = {key: _display_value(plan[key]) for key in keys if key in plan}
+                if "basic_salary" in plan or "daily_hours" in plan:
+                    risks.append("تغيير الراتب أو ساعات العمل يؤثر على احتساب الرواتب حسب تاريخ السريان.")
+            elif action == "transfer_employee":
+                new_values = {key: _display_value(plan.get(key)) for key in ("department_id", "branch_id", "effective_date")}
+                risks.append("سيُحفظ النقل في سجل التغييرات بتاريخ السريان المحدد.")
+            elif action == "archive_employee":
+                new_values = {"status": "archived", "service_period": "إغلاق فترة الخدمة المفتوحة"}
+                risks.append("الأرشفة لا تحذف التاريخ الوظيفي أو المالي.")
+            elif action == "rehire_employee":
+                new_values = {"status": "active", "hire_date": _display_value(plan.get("hire_date"))}
+                risks.append("إعادة التعيين ستنشئ فترة خدمة جديدة مع الاحتفاظ بكود الموظف السابق.")
+
+        elif action in {"create_leave", "confirm_leave", "cancel_leave"}:
+            record_id = plan.get("record_id")
+            if record_id is not None:
+                record = db.scalar(select(LeaveRecord).where(LeaveRecord.id == int(record_id)).with_for_update())
+                if record is None:
+                    raise ValueError("سجل الإجازة المستهدف غير موجود.")
+                old = {"status": record.status, "employee_id": record.employee_id,
+                       "leave_type_id": record.leave_type_id, "start_date": record.start_date.isoformat(),
+                       "end_date": record.end_date.isoformat(), "charged_days": str(record.charged_days)}
+                snapshot = {"action": action, "target": {"type": "leave", "id": record.id}, "current": old}
+            if action == "create_leave":
+                new_values = {key: _display_value(plan.get(key)) for key in
+                              ("employee_id", "leave_type_id", "start_date", "end_date", "charged_days", "reason")}
+                risks.append("سيتم إنشاء مسودة إجازة؛ لا يُخصم الرصيد إلا عند اعتمادها.")
+            elif action == "confirm_leave":
+                new_values = {"status": "confirmed", "balance_effect": "خصم الرصيد إذا كان نوع الإجازة يتتبع رصيدًا"}
+                risks.append("اعتماد الإجازة قد يخصم أيامًا من رصيد الموظف.")
+            else:
+                new_values = {"status": "cancelled", "balance_effect": "إعادة الرصيد إذا كانت الإجازة مؤكدة"}
+                risks.append("إلغاء إجازة مؤكدة ينشئ حركة عكسية في دفتر الرصيد ولا يمحو الحركة الأصلية.")
+
+        elif action in {"create_advance", "approve_advance", "reject_advance", "mark_advance_paid"}:
+            advance_id = plan.get("advance_id")
+            if advance_id is not None:
+                item = db.scalar(select(AdvanceRequest).where(AdvanceRequest.id == int(advance_id)).with_for_update())
+                if item is None:
+                    raise ValueError("طلب السلفة المستهدف غير موجود.")
+                old = {"status": item.status, "employee_id": item.employee_id, "amount": str(item.amount),
+                       "advance_type": item.advance_type, "payroll_month": item.payroll_month.isoformat()}
+                snapshot = {"action": action, "target": {"type": "advance", "id": item.id}, "current": old}
+            if action == "create_advance":
+                new_values = {key: _display_value(plan.get(key)) for key in
+                              ("employee_id", "amount", "advance_type", "request_date", "installment_count")}
+                risks.append("السلفة العادية تخضع لحد 25% ونافذة 15–22؛ سلفة التقسيط مستقلة وتحتاج جدولًا من 1 إلى 36 قسطًا.")
+            elif action == "approve_advance":
+                new_values = {"status": "approved", "installment_count": _display_value(plan.get("installment_count"))}
+                risks.append("الاعتماد ينشئ جدول الأقساط أو يحجز حد السلفة وفق نوعها.")
+            elif action == "reject_advance":
+                new_values = {"status": "rejected"}
+            else:
+                new_values = {"status": "paid"}
+                risks.append("تسجيل السداد يؤثر على دفتر الأقساط ومسير الرواتب.")
+
+        elif action in {"create_staff_action", "approve_staff_action", "cancel_staff_action"}:
+            item_id = plan.get("staff_action_id")
+            if item_id is not None:
+                item = db.scalar(select(StaffAction).where(StaffAction.id == int(item_id)).with_for_update())
+                if item is None:
+                    raise ValueError("إجراء الموظف المستهدف غير موجود.")
+                old = {"status": item.status, "employee_id": item.employee_id, "kind": item.kind,
+                       "category": item.category, "amount": _display_value(item.amount),
+                       "payroll_month": _display_value(item.payroll_month)}
+                snapshot = {"action": action, "target": {"type": "staff_action", "id": item.id}, "current": old}
+            if action == "create_staff_action":
+                new_values = {key: _display_value(plan.get(key)) for key in
+                              ("employee_id", "kind", "category", "title", "is_financial", "amount", "payroll_month")}
+                risks.append("المبالغ لا تُنشأ تلقائيًا؛ القيمة المدخلة يدويًا ستدخل الرواتب بعد الاعتماد.")
+            elif action == "approve_staff_action":
+                new_values = {"status": "approved"}
+                risks.append("إذا كان الإجراء ماليًا فسيدخل في مسير شهر الراتب المحدد.")
+            else:
+                new_values = {"status": "cancelled"}
+                risks.append("لا يمكن إلغاء إجراء محجوز لمسير رواتب أو مطبق عليه.")
+
+        elif action == "approve_attendance_day":
+            record_id = plan.get("attendance_record_id")
+            item = db.scalar(select(AttendanceDailyRecord).where(
+                AttendanceDailyRecord.id == int(record_id)).with_for_update()) if record_id is not None else None
+            if item is None:
+                raise ValueError("سجل الحضور المستهدف غير موجود.")
+            old = {"status": item.status, "employee_id": item.employee_id,
+                   "work_date": item.work_date.isoformat(),
+                   "clock_in": _display_value(item.first_clock_in),
+                   "clock_out": _display_value(item.last_clock_out)}
+            new_values = {"status": "approved", "clock_in": _display_value(plan.get("clock_in")),
+                          "clock_out": _display_value(plan.get("clock_out"))}
+            snapshot = {"action": action, "target": {"type": "attendance", "id": item.id}, "current": old}
+            risks.append("اعتماد الحضور يؤثر على حساب التأخير والغياب والرواتب.")
+
+        elif action == "approve_attendance_month":
+            month_id = plan.get("month_id")
+            item = db.scalar(select(AttendanceMonth).where(
+                AttendanceMonth.id == int(month_id)).with_for_update()) if month_id is not None else None
+            if item is None:
+                raise ValueError("شهر الحضور المستهدف غير موجود.")
+            old = {"status": item.status, "period_start": item.period_start.isoformat(),
+                   "period_end": item.period_end.isoformat()}
+            new_values = {"status": "approved", "coverage_confirmed": bool(plan.get("coverage_confirmed"))}
+            snapshot = {"action": action, "target": {"type": "attendance_month", "id": item.id}, "current": old}
+            risks.append("اعتماد الشهر شرط سابق لإنشاء واعتماد مسير الرواتب.")
+
+        elif action in {"approve_payroll_run", "close_payroll_run", "reopen_payroll_run"}:
+            run_id = plan.get("payroll_run_id")
+            item = db.scalar(select(PayrollRun).where(
+                PayrollRun.id == int(run_id)).with_for_update()) if run_id is not None else None
+            if item is None:
+                raise ValueError("مسير الرواتب المستهدف غير موجود.")
+            old = {"status": item.status, "period_start": item.period_start.isoformat(),
+                   "period_end": item.period_end.isoformat()}
+            target_status = {"approve_payroll_run": "approved", "close_payroll_run": "closed",
+                             "reopen_payroll_run": "reopened"}[action]
+            new_values = {"status": target_status, "reason": _display_value(plan.get("reason"))}
+            snapshot = {"action": action, "target": {"type": "payroll_run", "id": item.id}, "current": old}
+            risks.append("هذه عملية مالية مؤثرة. راجع كل بنود المسير والاستقطاعات والأقساط قبل التأكيد.")
+
+        else:
+            new_values = {key: _display_value(value) for key, value in plan.items()
+                          if key not in {"_confirmation_snapshot", "action", "summary"}}
+            risks.append("العملية تحتاج مراجعة إضافية قبل اعتمادها.")
+
+    return {"old_values": old, "new_values": new_values, "risks": risks, "snapshot": snapshot}
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -64,6 +231,8 @@ def prepare_command(question: str, actor: str) -> dict[str, Any]:
     if history_text:
         planning_question = f"السياق السابق للمحادثة (للفهم فقط):\\n{history_text}\\n\\nالأمر الحالي: {question}"
     plan = build_plan(planning_question)
+    preview = build_confirmation_preview(plan)
+    plan["_confirmation_snapshot"] = preview["snapshot"]
     token = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc)
     expires = now + timedelta(minutes=APPROVAL_TTL_MINUTES)
@@ -91,8 +260,11 @@ def prepare_command(question: str, actor: str) -> dict[str, Any]:
     _memory(actor, "assistant", f"خطة معلقة تحتاج موافقة: {summary}")
     return {
         "token": token,
-        "plan": plan,
+        "plan": {key: value for key, value in plan.items() if key != "_confirmation_snapshot"},
         "summary": summary,
+        "old_values": preview["old_values"],
+        "new_values": preview["new_values"],
+        "risks": preview["risks"],
         "expires_at": expires,
     }
 
@@ -170,7 +342,23 @@ def approve_command(token: str, actor: str) -> str:
                 ))
                 terminal_error = "خطة التنفيذ لم تعد مطابقة للخطة التي تم عرضها."
             else:
-                plan = candidate
+                expected_snapshot = candidate.get("_confirmation_snapshot")
+                try:
+                    current_preview = build_confirmation_preview(candidate)
+                except ValueError:
+                    current_preview = None
+                if expected_snapshot is not None and (
+                    current_preview is None or current_preview["snapshot"] != expected_snapshot
+                ):
+                    approval.status = "invalidated"
+                    db.add(AuditLog(
+                        actor=actor, action="ai_command_invalidated", entity_type="ai_command",
+                        entity_id=str(approval.id),
+                        reason="تغيرت بيانات السجل بعد عرض المعاينة وقبل التأكيد.",
+                    ))
+                    terminal_error = "تغيرت بيانات السجل منذ عرض المعاينة. جهّز الأمر مرة أخرى وراجع القيم الجديدة."
+                else:
+                    plan = candidate
                 approval.status = "executing"
                 approval.approved_at = now
                 db.add(AuditLog(

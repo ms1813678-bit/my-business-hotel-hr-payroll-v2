@@ -7,7 +7,7 @@ can mutate the database, and every operation uses existing workflow rules.
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlparse
@@ -34,7 +34,7 @@ from app.models import (
     StaffAction,
     AuditLog,
 )
-from app.attendance_workflow import approve_attendance_day, approve_attendance_month
+from app.attendance_workflow import add_manual_attendance, approve_attendance_day, approve_attendance_month
 from app.payroll_workflow import approve_payroll_run, close_payroll_run, reopen_payroll_run
 from app.staff_actions_workflow import approve_staff_action, cancel_staff_action
 
@@ -63,6 +63,7 @@ ALLOWED_ACTIONS = {
     "create_staff_action",
     "approve_staff_action",
     "cancel_staff_action",
+    "create_manual_attendance",
     "approve_attendance_day",
     "approve_attendance_month",
     "approve_payroll_run",
@@ -138,7 +139,7 @@ def _json_plan(question: str, context: dict[str, Any]) -> dict[str, Any]:
         "استخدم null للقيمة غير المطلوبة. الحقول المسموحة: action, employee_id, leave_type_id, "
         "record_id, balance_days, transaction_type, advance_id, amount, advance_type, "
         "installment_count, staff_action_id, kind, category, title, is_financial, payroll_month, "
-        "attendance_record_id, clock_in, clock_out, month_id, payroll_run_id, reason, "
+        "attendance_record_id, clock_in, clock_out, work_date, month_id, payroll_run_id, reason, "
         "start_date, end_date, charged_days, full_name, national_id, phone, address, position, "
         "department_id, branch_id, hire_date, basic_salary, daily_hours, fingerprint_id, effective_date, request_date, payroll_month, coverage_confirmed. "
         "أعد أيضًا summary بالعربية قصيرة. "
@@ -185,6 +186,24 @@ def execute_plan(plan: dict[str, Any], actor: str) -> str:
         raise ValueError("الأمر غير مسموح.")
 
     with SessionLocal.begin() as db:
+        if action == "create_manual_attendance":
+            work_date = _parse_date(plan["work_date"], "تاريخ العمل")
+            try:
+                clock_in = datetime.fromisoformat(str(plan["clock_in"]))
+                clock_out = datetime.fromisoformat(str(plan["clock_out"]))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("يجب إدخال وقت الدخول والخروج بصيغة تاريخ ووقت صحيحة.") from exc
+            record = add_manual_attendance(
+                db,
+                employee_id=int(plan["employee_id"]),
+                work_date=work_date,
+                clock_in=clock_in,
+                clock_out=clock_out,
+                reason=reason,
+                actor=actor,
+            )
+            return f"تم تسجيل حضور يدوي للموظف في سجل رقم {record.id}، والحالة تنتظر المراجعة والاعتماد."
+
         if action == "create_employee":
             full_name = str(plan.get("full_name") or "").strip()
             position = str(plan.get("position") or "").strip()

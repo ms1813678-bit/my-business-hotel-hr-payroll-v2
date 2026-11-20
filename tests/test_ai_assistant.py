@@ -48,3 +48,12 @@ def test_ai_network_policy_accepts_only_loopback():
     assert _loopback_only("http://127.0.0.1:11434")
     assert _loopback_only("http://localhost:11434")
     assert not _loopback_only("https://example.com:11434")
+
+
+def test_ai_command_supports_manual_attendance_and_safe_draft_leave_deletion():
+    from app.ai_agent import ALLOWED_ACTIONS, is_command_request
+
+    assert "create_manual_attendance" in ALLOWED_ACTIONS
+    assert "delete_draft_leave" in ALLOWED_ACTIONS
+    assert is_command_request("سجل حضور يدوي للموظف MY-0001")
+    assert is_command_request("احذف مسودة الإجازة رقم 12")

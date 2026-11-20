@@ -87,7 +87,7 @@ def build_confirmation_preview(plan: dict[str, Any]) -> dict[str, Any]:
                 new_values = {"status": "active", "hire_date": _display_value(plan.get("hire_date"))}
                 risks.append("إعادة التعيين ستنشئ فترة خدمة جديدة مع الاحتفاظ بكود الموظف السابق.")
 
-        elif action in {"create_leave", "confirm_leave", "cancel_leave"}:
+        elif action in {"create_leave", "confirm_leave", "cancel_leave", "delete_draft_leave"}:
             record_id = plan.get("record_id")
             if record_id is not None:
                 record = db.scalar(select(LeaveRecord).where(LeaveRecord.id == int(record_id)).with_for_update())
@@ -104,9 +104,12 @@ def build_confirmation_preview(plan: dict[str, Any]) -> dict[str, Any]:
             elif action == "confirm_leave":
                 new_values = {"status": "confirmed", "balance_effect": "خصم الرصيد إذا كان نوع الإجازة يتتبع رصيدًا"}
                 risks.append("اعتماد الإجازة قد يخصم أيامًا من رصيد الموظف.")
-            else:
+            elif action == "cancel_leave":
                 new_values = {"status": "cancelled", "balance_effect": "إعادة الرصيد إذا كانت الإجازة مؤكدة"}
                 risks.append("إلغاء إجازة مؤكدة ينشئ حركة عكسية في دفتر الرصيد ولا يمحو الحركة الأصلية.")
+            else:
+                new_values = {"status": "deleted"}
+                risks.append("الحذف متاح لمسودة غير معتمدة فقط، بشرط عدم وجود حركة رصيد مرتبطة. سيظل سجل التدقيق محفوظًا.")
 
         elif action in {"create_advance", "approve_advance", "reject_advance", "mark_advance_paid"}:
             advance_id = plan.get("advance_id")

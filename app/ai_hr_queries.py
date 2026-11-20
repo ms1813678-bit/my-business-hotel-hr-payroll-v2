@@ -21,6 +21,11 @@ from app.models import (
     Employee,
     LeaveType,
     StaffAction,
+    Department,
+    Branch,
+    PayrollRun,
+    PayrollItem,
+    PayrollPayment,
 )
 
 _DATE_RE = re.compile(r"(20\d{2})-(\d{2})-(\d{2})")
@@ -119,9 +124,110 @@ def is_staff_action_query_request(question: str) -> bool:
     )
 
 
+def is_employee_query_request(question: str) -> bool:
+    q = " ".join((question or "").casefold().split())
+    return any(term in q for term in (
+        "بيانات الموظف", "تفاصيل الموظف", "سجل الموظف", "ابحث عن الموظف",
+        "بيانات العامل", "employee profile", "employee details",
+    ))
+
+
+def is_payroll_query_request(question: str) -> bool:
+    q = " ".join((question or "").casefold().split())
+    return any(term in q for term in (
+        "راتب الموظف", "رواتب الموظفين", "مسير الرواتب", "تفاصيل الراتب",
+        "صافي الراتب", "payroll", "salary details",
+    ))
+
+
+def build_employee_report(question: str) -> dict[str, Any]:
+    with SessionLocal() as db:
+        employees = _find_employees(db, question)
+        items = []
+        for employee in employees:
+            department = db.get(Department, employee.department_id)
+            branch = db.get(Branch, employee.branch_id) if employee.branch_id else None
+            items.append({
+                "id": employee.id, "code": employee.code, "name": employee.full_name,
+                "status": employee.status, "department": department.name if department else "غير محدد",
+                "branch": branch.name if branch else "—", "position": employee.position,
+                "hire_date": employee.hire_date.isoformat(), "basic_salary": str(employee.basic_salary),
+                "daily_hours": str(employee.daily_hours),
+            })
+    return {"items": items, "note": "قراءة مباشرة من السجل المحلي. لم يتم تعديل أي بيانات."}
+
+
+def format_employee_report_ar(report: dict[str, Any]) -> str:
+    lines = ["نتيجة البحث في سجل الموظفين.", report.get("note", "")]
+    if not report.get("items"):
+        lines.append("لم أعثر على موظف مطابق. استخدم كود الموظف MY-0001 أو الاسم المسجل.")
+        return "\\n".join(lines)
+    for item in report["items"]:
+        lines.append(
+            f"{item['code']} — {item['name']} — {item['status']} — "
+            f"{item['department']} / {item['branch']} — {item['position']} — "
+            f"تعيين {item['hire_date']} — أساسي {item['basic_salary']} جنيه — "
+            f"{item['daily_hours']} ساعة يوميًا"
+        )
+    return "\\n".join(lines)
+
+
+def build_payroll_report(question: str) -> dict[str, Any]:
+    month = _parse_month(question)
+    with SessionLocal() as db:
+        run = db.scalar(select(PayrollRun).where(PayrollRun.period_start == month))
+        if run is None:
+            return {"month": month.isoformat(), "status": "not_created", "items": []}
+        employees = _find_employees(db, question)
+        employee_ids = {employee.id for employee in employees}
+        query = select(PayrollItem).where(PayrollItem.payroll_run_id == run.id)
+        if employee_ids:
+            query = query.where(PayrollItem.employee_id.in_(employee_ids))
+        items = db.scalars(query.order_by(PayrollItem.employee_code_snapshot)).all()
+        rows = []
+        for item in items:
+            paid = db.scalar(select(func.coalesce(func.sum(PayrollPayment.amount), 0)).where(
+                PayrollPayment.payroll_item_id == item.id
+            ))
+            rows.append({
+                "code": item.employee_code_snapshot, "name": item.employee_name_snapshot,
+                "base_salary": str(item.base_salary), "bonuses": str(
+                    item.attendance_bonus + item.performance_bonus + item.occupancy_bonus
+                    + item.overtime_amount + item.other_bonus + item.staff_reward_amount
+                ),
+                "deductions": str(
+                    item.absence_deduction + item.lateness_deduction + item.insurance_share
+                    + item.taxes + item.other_deductions + item.advance_deduction
+                    + item.staff_sanction_amount
+                ),
+                "net_pay": str(item.net_pay), "paid": str(paid or 0),
+                "status": run.status,
+            })
+        return {"month": month.isoformat(), "status": run.status, "pay_date": run.pay_date.isoformat(),
+                "items": rows}
+
+
+def format_payroll_report_ar(report: dict[str, Any]) -> str:
+    if report.get("status") == "not_created":
+        return f"لا يوجد مسير رواتب منشأ لشهر {report['month']}."
+    lines = [f"ملخص مسير الرواتب لشهر {report['month']} — الحالة: {report['status']} — موعد الصرف: {report['pay_date']}."]
+    if not report.get("items"):
+        lines.append("لا توجد بنود مطابقة للموظف أو الفترة المحددة.")
+        return "\\n".join(lines)
+    for item in report["items"]:
+        lines.append(
+            f"{item['code']} — {item['name']} — أساسي {item['base_salary']} — "
+            f"إضافات {item['bonuses']} — خصومات {item['deductions']} — "
+            f"صافي {item['net_pay']} — مدفوع {item['paid']}"
+        )
+    return "\\n".join(lines)
+
+
 def is_structured_hr_query(question: str) -> bool:
     return (
-        is_attendance_analysis_request(question)
+        is_employee_query_request(question)
+        or is_payroll_query_request(question)
+        or is_attendance_analysis_request(question)
         or is_leave_balance_request(question)
         or is_advance_query_request(question)
         or is_staff_action_query_request(question)
@@ -372,6 +478,10 @@ def format_staff_actions_ar(report: dict[str, Any]) -> str:
 
 def answer_structured_hr_query(question: str) -> str:
     """Dispatch a natural-language HR question to the matching read-only report."""
+    if is_employee_query_request(question):
+        return format_employee_report_ar(build_employee_report(question))
+    if is_payroll_query_request(question):
+        return format_payroll_report_ar(build_payroll_report(question))
     if is_attendance_analysis_request(question):
         q = question or ""
         if _DATE_RE.search(q) and "شهر" not in q:

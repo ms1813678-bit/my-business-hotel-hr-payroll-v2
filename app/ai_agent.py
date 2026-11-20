@@ -29,6 +29,7 @@ from app.models import (
     EmployeeServicePeriod,
     Employee,
     LeaveRecord,
+    LeaveBalanceTransaction,
     LeaveType,
     PayrollRun,
     StaffAction,
@@ -42,7 +43,7 @@ from app.staff_actions_workflow import approve_staff_action, cancel_staff_action
 WRITE_PREFIXES = ("نفذ ", "نفّذ ", "نفذ:", "نفّذ:")
 COMMAND_WORDS = (
     "أنشئ", "انشئ", "أضف", "اضف", "عدّل", "عدل", "غيّر", "غير", "انقل",
-    "أرشف", "ارشف", "أعد تعيين", "اعد تعيين", "سجّل", "سجل", "اعتمد",
+    "أرشف", "ارشف", "أعد تعيين", "اعد تعيين", "سجّل", "سجل", "احذف", "اعتمد",
     "وافق", "ألغ", "الغ", "ادفع", "أغلق", "اغلق", "أعد فتح", "اعد فتح",
 )
 
@@ -55,6 +56,7 @@ ALLOWED_ACTIONS = {
     "create_leave",
     "confirm_leave",
     "cancel_leave",
+    "delete_draft_leave",
     "adjust_leave_balance",
     "create_advance",
     "approve_advance",
@@ -107,6 +109,7 @@ def _plan_context(db) -> dict[str, Any]:
     leave_types = db.scalars(select(LeaveType).where(LeaveType.active.is_(True)).order_by(LeaveType.id)).all()
     advances = db.scalars(select(AdvanceRequest).order_by(AdvanceRequest.id.desc()).limit(100)).all()
     staff_actions = db.scalars(select(StaffAction).order_by(StaffAction.id.desc()).limit(100)).all()
+    leave_records = db.scalars(select(LeaveRecord).order_by(LeaveRecord.id.desc()).limit(100)).all()
     attendance_months = db.scalars(select(AttendanceMonth).order_by(AttendanceMonth.id.desc()).limit(36)).all()
     attendance_records = db.scalars(select(AttendanceDailyRecord).order_by(AttendanceDailyRecord.id.desc()).limit(100)).all()
     payroll_runs = db.scalars(select(PayrollRun).order_by(PayrollRun.id.desc()).limit(36)).all()
@@ -115,6 +118,9 @@ def _plan_context(db) -> dict[str, Any]:
                        "department_id": e.department_id, "branch_id": e.branch_id} for e in employees],
         "departments": [{"id": d.id, "name": d.name} for d in departments],
         "leave_types": [{"id": t.id, "code": t.code, "name": t.name_ar} for t in leave_types],
+        "leave_records": [{"id": x.id, "employee_id": x.employee_id, "status": x.status,
+                           "start_date": x.start_date.isoformat(), "end_date": x.end_date.isoformat()}
+                          for x in leave_records],
         "advances": [{"id": x.id, "employee_id": x.employee_id, "amount": str(x.amount),
                       "status": x.status, "advance_type": x.advance_type,
                       "request_date": x.request_date.isoformat(), "payroll_month": x.payroll_month.isoformat()} for x in advances],
@@ -366,6 +372,30 @@ def execute_plan(plan: dict[str, Any], actor: str) -> str:
             if record is None: raise ValueError("سجل الإجازة غير موجود.")
             cancel_leave(db, record, actor, reason)
             return f"تم إلغاء الإجازة رقم {record.id}."
+
+        if action == "delete_draft_leave":
+            record = db.scalar(select(LeaveRecord).where(LeaveRecord.id == int(plan["record_id"])).with_for_update())
+            if record is None:
+                raise ValueError("سجل الإجازة غير موجود.")
+            if record.status != "draft":
+                raise ValueError("الحذف مسموح لمسودة الإجازة فقط؛ استخدم الإلغاء للسجلات الأخرى.")
+            linked = db.scalar(select(LeaveBalanceTransaction.id).where(
+                LeaveBalanceTransaction.leave_record_id == record.id
+            ).limit(1))
+            if linked is not None:
+                raise ValueError("لا يمكن حذف إجازة لها حركة رصيد مرتبطة.")
+            old_value = (
+                f"employee_id={record.employee_id}; dates={record.start_date}|{record.end_date}; "
+                f"charged_days={record.charged_days}; status={record.status}"
+            )
+            record_id = record.id
+            db.delete(record)
+            db.add(AuditLog(
+                actor=actor, action="ai_draft_leave_deleted", entity_type="leave_record",
+                entity_id=str(record_id), old_value=old_value, new_value="deleted",
+                reason=reason,
+            ))
+            return f"تم حذف مسودة الإجازة رقم {record_id} فقط، مع الاحتفاظ بسجل التدقيق."
 
         if action == "adjust_leave_balance":
             employee = db.get(Employee, int(plan["employee_id"]))

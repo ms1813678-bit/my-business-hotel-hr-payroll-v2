@@ -1821,3 +1821,63 @@ def test_all_main_html_pages_render_in_each_supported_language(
             )
         assert 'href="/settings/backup"' in response.text
         assert 'href="/backup"' not in response.text
+
+
+def test_ai_pending_confirmation_uses_v22_routes_and_shows_before_after(monkeypatch, client):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    assert login(client).status_code == 303
+    monkeypatch.setattr("app.main.is_command_request", lambda question: True)
+    monkeypatch.setattr(
+        "app.main.prepare_command",
+        lambda question, actor: {
+            "token": "single-use-test-token",
+            "summary": "تحديث تجريبي",
+            "plan": {"action": "edit_employee", "employee_id": 7},
+            "old_values": {"الراتب": "5000"},
+            "new_values": {"الراتب": "5500"},
+            "risks": ["مراجعة الأثر المالي"],
+            "expires_at": datetime.now(timezone.utc),
+        },
+    )
+    monkeypatch.setattr(
+        "app.main.local_model_status",
+        lambda: SimpleNamespace(available=False, message="النموذج غير متاح", model="test-model"),
+    )
+    page = client.get("/ai")
+    response = client.post(
+        "/ai",
+        data={"csrf_token": csrf_from(page), "question": "اعرض خطة تعديل تجريبية"},
+    )
+    assert response.status_code == 200
+    assert "البيانات الحالية قبل التنفيذ" in response.text
+    assert "التغييرات المطلوبة بعد التنفيذ" in response.text
+    assert "5000" in response.text and "5500" in response.text
+    assert 'action="/ai/approve"' in response.text
+    assert 'action="/ai/reject"' in response.text
+    assert 'name="token" value="single-use-test-token"' in response.text
+    assert 'action="/ai/prepare"' not in response.text
+    assert 'action="/ai/confirm"' not in response.text
+
+
+def test_ai_question_form_preserves_question_and_uses_existing_post_route(monkeypatch, client):
+    from types import SimpleNamespace
+
+    assert login(client).status_code == 303
+    monkeypatch.setattr("app.main.is_command_request", lambda question: False)
+    monkeypatch.setattr("app.main.is_structured_hr_query", lambda question: False)
+    monkeypatch.setattr("app.main.ask_local_model", lambda question, context: "إجابة تجريبية")
+    monkeypatch.setattr(
+        "app.main.local_model_status",
+        lambda: SimpleNamespace(available=True, message="جاهز", model="test-model"),
+    )
+    page = client.get("/ai")
+    response = client.post(
+        "/ai",
+        data={"csrf_token": csrf_from(page), "question": "اشرح ملخص الحضور"},
+    )
+    assert response.status_code == 200
+    assert 'action="/ai"' in response.text
+    assert "اشرح ملخص الحضور" in response.text
+    assert "إجابة تجريبية" in response.text

@@ -155,3 +155,32 @@ def test_ai_refuses_to_delete_confirmed_leave(monkeypatch):
             assert db.get(LeaveRecord, leave_id) is not None
     finally:
         engine.dispose()
+
+
+def test_run_ai_command_never_executes_even_with_explicit_execute_prefix(monkeypatch):
+    import app.ai_agent as agent
+    import app.ai_gateway as gateway
+    from datetime import datetime, timezone
+
+    called = {}
+    def fake_prepare(question, actor):
+        called["actor"] = actor
+        return {
+            "token": "one-time-token",
+            "plan": {"action": "approve_payroll_run", "payroll_run_id": 9},
+            "summary": "اعتماد مسير الرواتب رقم 9",
+            "expires_at": datetime(2026, 11, 20, tzinfo=timezone.utc),
+        }
+
+    def forbidden_execute(*args, **kwargs):
+        raise AssertionError("run_ai_command must never execute a write")
+
+    monkeypatch.setattr(agent, "_loopback_only", lambda url: True)
+    monkeypatch.setattr(gateway, "prepare_command", fake_prepare)
+    monkeypatch.setattr(agent, "execute_plan", forbidden_execute)
+    result = agent.run_ai_command("نفذ: اعتمد مسير الرواتب رقم 9", "hr-admin")
+
+    assert result["executed"] is False
+    assert result["pending"] is True
+    assert result["token"] == "one-time-token"
+    assert called["actor"] == "hr-admin"

@@ -394,13 +394,13 @@ def approve_command(token: str, actor: str) -> str:
                     terminal_error = "تغيرت بيانات السجل منذ عرض المعاينة. جهّز الأمر مرة أخرى وراجع القيم الجديدة."
                 else:
                     plan = candidate
-                approval.status = "executing"
-                approval.approved_at = now
-                db.add(AuditLog(
-                    actor=actor, action="ai_command_approved", entity_type="ai_command",
-                    entity_id=str(approval.id), new_value=f"plan_hash={approval.plan_hash}",
-                    reason="موافقة صريحة من مسؤول الموارد البشرية.",
-                ))
+                    approval.status = "executing"
+                    approval.approved_at = now
+                    db.add(AuditLog(
+                        actor=actor, action="ai_command_approved", entity_type="ai_command",
+                        entity_id=str(approval.id), new_value=f"plan_hash={approval.plan_hash}",
+                        reason="موافقة صريحة من مسؤول الموارد البشرية.",
+                    ))
     # Persist expired/invalidated states before surfacing the corresponding error.
     if terminal_error is not None:
         raise ValueError(terminal_error)

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>المساعد الذكي — V2</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#0f172a; color:#e2e8f0; margin:0; }
+    header { background:#1e293b; padding:1rem 1.5rem; display:flex; justify-content:space-between; align-items:center; }
+    main { padding:1.5rem; max-width:800px; margin:0 auto; }
+    a { color:#93c5fd; }
+    .card { background:#1e293b; padding:1.25rem; border-radius:12px; margin-bottom:1rem; }
+    textarea { width:100%; min-height:90px; padding:.75rem; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; box-sizing:border-box; }
+    button { padding:.65rem 1.2rem; border:none; border-radius:8px; font-weight:600; cursor:pointer; margin-left:.5rem; }
+    .primary { background:#2563eb; color:white; }
+    .danger { background:#b91c1c; color:white; }
+    .success { background:#15803d; color:white; }
+    .muted { color:#94a3b8; font-size:.9rem; }
+    table { width:100%; border-collapse:collapse; margin-top:.75rem; }
+    td, th { border:1px solid #334155; padding:.5rem .7rem; text-align:right; font-size:.9rem; }
+    .ok { color:#86efac; }
+    .err { color:#fca5a5; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>المساعد الذكي — Version 2</strong>
+    <div>
+      <a href="/dashboard">لوحة التحكم</a> ·
+      <a href="/logout">خروج</a>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <p class="muted">
+        المساعد يجهّز العملية أولاً ويعرض الملخص والبيانات القديمة والجديدة.
+        التنفيذ يتم فقط بعد ضغط «تأكيد التنفيذ».
+      </p>
+      {% if ai_status.available %}
+        <p class="ok">المساعد المحلي جاهز.</p>
+      {% else %}
+        <p class="err">المساعد المحلي غير متاح: {{ ai_status.message }}</p>
+      {% endif %}
+
+      <form method="post" action="/ai/prepare">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>اكتب الأمر باللغة الطبيعية:</label>
+        <textarea name="question" required placeholder="مثال: أنشئ موظفًا جديدًا اسمه ... في قسم الأمن">{% if question %}{{ question }}{% endif %}</textarea>
+        <div style="margin-top:.75rem">
+          <button type="submit" class="primary">تجهيز العملية</button>
+        </div>
+      </form>
+    </div>
+
+    {% if confirmation %}
+    <div class="card">
+      <h3 style="margin-top:0">مراجعة قبل التنفيذ</h3>
+      <p><strong>الملخص:</strong> {{ confirmation.summary }}</p>
+      <p><strong>العملية:</strong> {{ confirmation.action or "—" }}</p>
+
+      {% if confirmation.old_values %}
+      <h4>البيانات القديمة</h4>
+      <table>
+        {% for k, v in confirmation.old_values.items() %}
+        <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
+        {% endfor %}
+      </table>
+      {% endif %}
+
+      {% if confirmation.new_values %}
+      <h4>البيانات الجديدة</h4>
+      <table>
+        {% for k, v in confirmation.new_values.items() %}
+        <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
+        {% endfor %}
+      </table>
+      {% endif %}
+
+      {% if confirmation.risks %}
+      <h4>المخاطر / ملاحظات</h4>
+      <ul>
+        {% for r in confirmation.risks %}
+        <li>{{ r }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+
+      <p class="muted">{{ confirmation.message }}</p>
+
+      <form method="post" action="/ai/confirm" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="confirmation_token" value="{{ confirmation.confirmation_token }}">
+        <button type="submit" class="success">تأكيد التنفيذ</button>
+      </form>
+      <form method="post" action="/ai/reject" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="confirmation_token" value="{{ confirmation.confirmation_token }}">
+        <button type="submit" class="danger">رفض</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if result %}
+    <div class="card">
+      {% if result.success %}<p class="ok">{{ result.success }}</p>{% endif %}
+      {% if result.info %}<p>{{ result.info }}</p>{% endif %}
+      {% if result.error %}<p class="err">{{ result.error }}</p>{% endif %}
+    </div>
+    {% endif %}
+  </main>
+</body>
+</html>

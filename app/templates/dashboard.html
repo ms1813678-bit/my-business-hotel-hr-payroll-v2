@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>لوحة التحكم — V2</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#0f172a; color:#e2e8f0; margin:0; }
+    header { background:#1e293b; padding:1rem 1.5rem; display:flex; justify-content:space-between; align-items:center; }
+    main { padding:1.5rem; max-width:1100px; margin:0 auto; }
+    a { color:#93c5fd; text-decoration:none; }
+    .card { background:#1e293b; padding:1.25rem; border-radius:12px; margin-bottom:1rem; }
+    .badge { display:inline-block; padding:.25rem .6rem; border-radius:999px; font-size:.8rem; }
+    .ok { background:#14532d; color:#bbf7d0; }
+    .warn { background:#713f12; color:#fde68a; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>M.Y. Business Hotel HR — Version 2</strong>
+    <div>
+      <span>{{ admin.username }}</span> ·
+      <a href="/ai">المساعد الذكي</a> ·
+      <a href="/logout">خروج</a>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <h2 style="margin-top:0">لوحة التحكم</h2>
+      <p>مرحبًا {{ admin.username }}. النظام يعمل محليًا.</p>
+      <p>
+        حالة المساعد الذكي:
+        {% if ai_status.available %}
+          <span class="badge ok">جاهز</span>
+        {% else %}
+          <span class="badge warn">غير متاح — {{ ai_status.message }}</span>
+        {% endif %}
+      </p>
+      <p><a href="/ai">→ فتح المساعد الذكي (تجهيز → تأكيد → تنفيذ)</a></p>
+    </div>
+  </main>
+</body>
+</html>

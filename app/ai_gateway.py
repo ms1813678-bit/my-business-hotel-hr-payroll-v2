@@ -1,10 +1,10 @@
-"""Approval gateway for the local HR AI command agent (Version 2).
+"""Approval gateway for the local HR AI command agent (Version 2.1).
 
 The model may prepare a plan, but every state-changing command must pass through
 this gateway. Approval tokens are single-use, hashed at rest, time-limited, and
 bound to the administrator who requested the plan and to the exact plan hash.
 
-Version 2 confirmation contract:
+Version 2.1 confirmation contract:
 1. prepare_command builds a plan and returns a structured payload for the UI
 2. UI must display summary + old_values + new_values + risks
 3. Admin must explicitly confirm (token is bound to the plan)
@@ -57,6 +57,42 @@ def recent_memory(actor: str, limit: int = 12) -> list[dict[str, str]]:
     return [{"role": row.role, "content": row.content} for row in rows]
 
 
+def enrich_plan_for_display(plan: dict[str, Any]) -> dict[str, Any]:
+    """Ensure old_values / new_values / risks exist for confirmation UI."""
+    action = str(plan.get("action") or "")
+    old_values = dict(plan.get("old_values") or {})
+    new_values = dict(plan.get("new_values") or {})
+    risks = list(plan.get("risks") or [])
+
+    for key in (
+        "full_name", "basic_salary", "position", "phone", "department_id", "branch_id",
+        "amount", "installment_count", "charged_days", "start_date", "end_date",
+        "clock_in", "clock_out", "kind", "category", "title", "employee_id",
+        "leave_type_id", "payroll_run_id", "advance_id",
+    ):
+        if key in plan and plan[key] is not None and key not in new_values:
+            new_values[key] = plan[key]
+
+    if action in {"archive_employee", "rehire_employee"}:
+        risks.append("يؤثر على الحالة الوظيفية للموظف وسجل الخدمة.")
+    if action in {"approve_payroll_run", "close_payroll_run"}:
+        risks.append("عملية مالية نهائية أو قريبة من النهائية — راجع المسير جيدًا قبل التأكيد.")
+    if action == "reopen_payroll_run":
+        risks.append("إعادة فتح مسير رواتب مغلق قد تؤثر على الأقساط والخصومات المطبقة.")
+    if action.startswith("approve_") or action.startswith("close_"):
+        risks.append("لا يمكن التراجع بسهولة بعد الاعتماد في بعض الحالات.")
+    if action in {"create_advance", "approve_advance"}:
+        risks.append("سلفة تؤثر على صافي الراتب والأقساط المستقبلية.")
+    if not risks:
+        risks.append("تأكد من صحة البيانات قبل التأكيد.")
+
+    plan = dict(plan)
+    plan["old_values"] = old_values
+    plan["new_values"] = new_values
+    plan["risks"] = risks
+    return plan
+
+
 def prepare_command(question: str, actor: str) -> dict[str, Any]:
     """Build a plan without mutating data. Returns confirmation payload for the UI."""
     history = recent_memory(actor, limit=8)
@@ -66,7 +102,7 @@ def prepare_command(question: str, actor: str) -> dict[str, Any]:
         planning_question = (
             f"السياق السابق للمحادثة (للفهم فقط):\\n{history_text}\\n\\nالأمر الحالي: {question}"
         )
-    plan = build_plan(planning_question)
+    plan = enrich_plan_for_display(build_plan(planning_question))
     token = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc)
     expires = now + timedelta(minutes=APPROVAL_TTL_MINUTES)
@@ -100,12 +136,14 @@ def prepare_command(question: str, actor: str) -> dict[str, Any]:
     return {
         "status": "awaiting_confirmation",
         "confirmation_token": token,
+        "token": token,
         "expires_at": expires.isoformat(),
         "summary": summary,
         "action": plan.get("action"),
         "old_values": old_values,
         "new_values": new_values,
         "risks": risks,
+        "plan": plan,
         "plan_preview": {k: v for k, v in plan.items() if k not in {"old_values", "new_values", "risks"}},
         "message": (
             "تم تجهيز العملية. راجع الملخص والبيانات القديمة والجديدة ثم اضغط "

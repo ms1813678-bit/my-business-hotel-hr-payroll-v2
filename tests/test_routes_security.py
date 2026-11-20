@@ -74,9 +74,11 @@ def client(monkeypatch):
 
     app.dependency_overrides[get_db] = override_get_db
     monkeypatch.setattr("app.main.SessionLocal", TestingSessionLocal)
-    # Keep AI conversation history on the same isolated test database; the
-    # gateway owns its own SessionLocal reference.
-    monkeypatch.setattr("app.ai_gateway.SessionLocal", TestingSessionLocal)
+    # The route tests below verify HTML/CSRF/routing behavior, not the
+    # persistent conversation repository. Stub the imported route helper so
+    # these tests never fall through to the CI PostgreSQL database. The
+    # gateway's persistence is covered by its own database-level tests.
+    monkeypatch.setattr("app.main.recent_memory", lambda actor, limit=12: [])
 
     with TestClient(app) as test_client:
         test_client.test_department_id = department_id

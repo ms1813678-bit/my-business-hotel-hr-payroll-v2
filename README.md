@@ -1,8 +1,8 @@
-# M.Y. Business Hotel — HR & Payroll System — Version 2
+# M.Y. Business Hotel — HR & Payroll System — Version 2.1
 
 **Local-first HR & Payroll system for M.Y. Business Hotel (Maadi, Cairo)**
 
-Version 2 is an independent release focused on completeness, a powerful local intelligent assistant, multi-language support (Arabic / English / Simplified Chinese), and production readiness on Windows 10/11 with local PostgreSQL.
+Version 2.1 is an independent release focused on completeness, a powerful local intelligent assistant, multi-language support (Arabic / English / Simplified Chinese), and production readiness on Windows 10/11 with local PostgreSQL.
 
 ## Core principles
 
@@ -14,9 +14,9 @@ Version 2 is an independent release focused on completeness, a powerful local in
 
 ## Status
 
-Version 2 is under active development on this repository. The foundation is taken from the most advanced feature work of the previous project and is being hardened, completed, and extended.
+Version 2.1 foundation is complete on this repository: full data models, all core workflows, AI confirmation gateway, attendance/security/leave/advances/payroll/reports/backup, and test suite.
 
-Do not use real employee or payroll data until the final acceptance checklist is passed.
+Do not use real employee or payroll data until the final acceptance checklist is passed and signed off.
 
 ## Architecture (high level)
 
@@ -44,10 +44,11 @@ Do not use real employee or payroll data until the final acceptance checklist is
 ```bash
 # Python 3.11+
 python -m venv .venv
-source .venv/bin/activate   # or Windows equivalent
+# Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
-# set DATABASE_URL and SESSION_SECRET
+# set DATABASE_URL and SESSION_SECRET (long random)
 alembic upgrade head
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```

@@ -466,12 +466,21 @@ def execute_plan(plan: dict[str, Any], actor: str) -> str:
 
 
 def run_ai_command(question: str, actor: str) -> dict[str, Any]:
+    """Prepare an approval-bound operation; never execute from this API."""
     if not _loopback_only(__import__("app.ai_assistant", fromlist=["OLLAMA_BASE_URL"]).OLLAMA_BASE_URL):
         raise RuntimeError("تم منع الاتصال لأن عنوان نموذج الذكاء المحلي ليس على الجهاز نفسه.")
-    plan = build_plan(question)
-    executing = wants_execution(question)
-    summary = str(plan.get("summary") or "تم تحليل الأمر.")
-    if not executing:
-        return {"executed": False, "plan": plan, "message": f"معاينة فقط: {summary} اكتب «نفذ: {question}» لتنفيذ الأمر."}
-    message = execute_plan(plan, actor)
-    return {"executed": True, "plan": plan, "message": message}
+
+    # A command request, including an explicit execute prefix, is not consent.
+    # All writes must use the persisted, actor-bound, single-use approval gateway.
+    from app.ai_gateway import prepare_command
+
+    pending = prepare_command(question, actor)
+    return {
+        "executed": False,
+        "pending": True,
+        "token": pending["token"],
+        "plan": pending["plan"],
+        "summary": pending["summary"],
+        "expires_at": pending["expires_at"],
+        "message": "تم تجهيز العملية فقط. يلزم تأكيد مستقل وصريح عبر بوابة الموافقات قبل التنفيذ.",
+    }

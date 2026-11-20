@@ -47,6 +47,7 @@ from app.attendance_workflow import persist_attendance_import, prepare_and_persi
 from app.security_roster_workflow import prepare_security_roster, confirm_security_roster_day
 from app.ai_assistant import ask_local_model, local_fallback_answer, local_model_status
 from app.ai_agent import is_command_request
+from app.ai_hr_queries import is_structured_hr_query, answer_structured_hr_query
 from app.ai_gateway import prepare_command, approve_command, reject_command, recent_memory
 
 SECURITY_ROSTER_MAX_BYTES = 5 * 1024 * 1024
@@ -403,10 +404,16 @@ def ai_ask(
                     )) or 0,
                 }
             }
-        try:
-            answer = ask_local_model(question, context)
-        except RuntimeError:
-            answer = local_fallback_answer(question, context)
+        if is_structured_hr_query(question):
+            try:
+                answer = answer_structured_hr_query(question)
+            except (RuntimeError, ValueError, SQLAlchemyError) as exc:
+                answer = f"تعذر قراءة بيانات الموارد البشرية المطلوبة: {exc}"
+        else:
+            try:
+                answer = ask_local_model(question, context)
+            except RuntimeError:
+                answer = local_fallback_answer(question, context)
 
     return templates.TemplateResponse(
         request=request,

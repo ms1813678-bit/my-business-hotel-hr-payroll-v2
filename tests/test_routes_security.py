@@ -74,6 +74,9 @@ def client(monkeypatch):
 
     app.dependency_overrides[get_db] = override_get_db
     monkeypatch.setattr("app.main.SessionLocal", TestingSessionLocal)
+    # Keep AI conversation history on the same isolated test database; the
+    # gateway owns its own SessionLocal reference.
+    monkeypatch.setattr("app.ai_gateway.SessionLocal", TestingSessionLocal)
 
     with TestClient(app) as test_client:
         test_client.test_department_id = department_id

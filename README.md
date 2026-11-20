@@ -1,4 +1,4 @@
-# M.Y. Business Hotel — HR & Payroll System — Version 2
+# M.Y. Business Hotel — HR & Payroll System — Version 2.2
 
 **Independent Version 2.2 | M.Y. Business Hotel — Maadi, Cairo**
 
@@ -33,6 +33,9 @@ A local-first HR and payroll application for Windows 10/11, using PostgreSQL on 
 - Windows PowerShell setup/start and local backup/restore scripts.
 
 ## Development status
+
+**Project control:** [`docs/MASTER_PROJECT_NOTE_V2_2.md`](docs/MASTER_PROJECT_NOTE_V2_2.md) is the single source of truth for instructions, phases, decisions, completed work, test evidence, blockers, and the next task. Read it before every task and update it after every task. Do not use chat history as the project ledger.
+
 
 The initial V2 repository was a small foundation. The current integration branch imports the broader HR/payroll implementation and tests from the latest reviewed source branch as a starting baseline. This is not a production release. The imported test suite and Windows installation must be rerun on the V2 commit; no test is claimed successful until its result is observed.
 

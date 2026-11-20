@@ -41,7 +41,18 @@
     <section class="card">
       <h2>خطة تحتاج موافقتك</h2>
       <p><strong>{{ pending.summary }}</strong></p>
-      <pre class="ai-plan">{{ pending.plan | tojson(indent=2, ensure_ascii=False) }}</pre>
+      <h3>البيانات الحالية قبل التنفيذ</h3>
+      <pre class="ai-plan">{{ pending.old_values | tojson(indent=2, ensure_ascii=False) }}</pre>
+      <h3>التغييرات المطلوبة بعد التنفيذ</h3>
+      <pre class="ai-plan">{{ pending.new_values | tojson(indent=2, ensure_ascii=False) }}</pre>
+      {% if pending.risks %}
+      <h3>الآثار والتنبيهات</h3>
+      <ul>{% for risk in pending.risks %}<li>{{ risk }}</li>{% endfor %}</ul>
+      {% endif %}
+      <details>
+        <summary>تفاصيل خطة التنفيذ</summary>
+        <pre class="ai-plan">{{ pending.plan | tojson(indent=2, ensure_ascii=False) }}</pre>
+      </details>
       <p class="muted">هذه الخطة محفوظة ببصمة. صلاحيتها محدودة، ولا يمكن إعادة استخدام الموافقة بعد التنفيذ.</p>
       <div class="actions">
         <form method="post" action="/ai/approve">

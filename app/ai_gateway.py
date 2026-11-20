@@ -151,6 +151,38 @@ def build_confirmation_preview(plan: dict[str, Any]) -> dict[str, Any]:
                 new_values = {"status": "cancelled"}
                 risks.append("لا يمكن إلغاء إجراء محجوز لمسير رواتب أو مطبق عليه.")
 
+        elif action == "create_manual_attendance":
+            employee_id = int(plan.get("employee_id") or 0)
+            employee = db.scalar(select(Employee).where(Employee.id == employee_id).with_for_update())
+            if employee is None:
+                raise ValueError("الموظف المستهدف غير موجود.")
+            work_date = date.fromisoformat(str(plan["work_date"]))
+            month = db.scalar(select(AttendanceMonth).where(
+                AttendanceMonth.period_start <= work_date,
+                AttendanceMonth.period_end >= work_date,
+            ).with_for_update())
+            existing = db.scalar(select(AttendanceDailyRecord).where(
+                AttendanceDailyRecord.employee_id == employee_id,
+                AttendanceDailyRecord.work_date == work_date,
+            ).with_for_update())
+            old = {
+                "employee": employee.full_name,
+                "employee_status": employee.status,
+                "attendance_month_status": month.status if month else None,
+                "existing_record_status": existing.status if existing else "no_record",
+            }
+            new_values = {
+                "employee_id": employee_id,
+                "work_date": work_date.isoformat(),
+                "clock_in": _display_value(plan.get("clock_in")),
+                "clock_out": _display_value(plan.get("clock_out")),
+                "status": "needs_review",
+                "reason": _display_value(plan.get("reason")),
+            }
+            snapshot = {"action": action, "target": {"type": "manual_attendance", "employee_id": employee_id,
+                        "work_date": work_date.isoformat()}, "current": old}
+            risks.append("سيُسجل الحضور كإدخال HR يدوي مستقل عن البصمة، وسيظل بحاجة إلى المراجعة والاعتماد.")
+
         elif action == "approve_attendance_day":
             record_id = plan.get("attendance_record_id")
             item = db.scalar(select(AttendanceDailyRecord).where(

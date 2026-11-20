@@ -1,111 +1,132 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="utf-8">
-  <title>المساعد الذكي — Version 2.1</title>
-  <style>
-    body { font-family: system-ui, sans-serif; background:#0f172a; color:#e2e8f0; margin:0; }
-    header { background:#1e293b; padding:1rem 1.5rem; display:flex; justify-content:space-between; align-items:center; }
-    main { padding:1.5rem; max-width:800px; margin:0 auto; }
-    a { color:#93c5fd; }
-    .card { background:#1e293b; padding:1.25rem; border-radius:12px; margin-bottom:1rem; }
-    textarea { width:100%; min-height:90px; padding:.75rem; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; box-sizing:border-box; }
-    button { padding:.65rem 1.2rem; border:none; border-radius:8px; font-weight:600; cursor:pointer; margin-left:.5rem; }
-    .primary { background:#2563eb; color:white; }
-    .danger { background:#b91c1c; color:white; }
-    .success { background:#15803d; color:white; }
-    .muted { color:#94a3b8; font-size:.9rem; }
-    table { width:100%; border-collapse:collapse; margin-top:.75rem; }
-    td, th { border:1px solid #334155; padding:.5rem .7rem; text-align:right; font-size:.9rem; }
-    .ok { color:#86efac; }
-    .err { color:#fca5a5; }
-  </style>
-</head>
-<body>
-  <header>
-    <strong>المساعد الذكي — Version 2.1</strong>
-    <div>
-      <a href="/dashboard">لوحة التحكم</a> ·
-      <a href="/logout">خروج</a>
-    </div>
-  </header>
-  <main>
-    <div class="card">
-      <p class="muted">
-        المساعد يجهّز العملية أولاً ويعرض الملخص والبيانات القديمة والجديدة والمخاطر.
-        التنفيذ يتم فقط بعد ضغط «تأكيد التنفيذ». التأكيد مرتبط بهذه الخطة فقط.
-      </p>
-      {% if ai_status.available %}
-        <p class="ok">المساعد المحلي جاهز.</p>
-      {% else %}
-        <p class="err">المساعد المحلي غير متاح: {{ ai_status.message }}</p>
-      {% endif %}
+{% extends "base.html" %}
+{% set active_nav = "ai" %}
+{% block title %}المساعد الذكي — Version 2.1{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">المساعد التنفيذي</p>
+    <h1>المساعد الذكي</h1>
+    <p class="muted">يفهم أوامرك، يجهّز العملية، ويعرض التفاصيل قبل أي تنفيذ. التنفيذ يتم فقط بعد تأكيدك الصريح.</p>
+  </div>
+  <div class="header-actions">
+    <a class="button-link btn-soft" href="/">العودة للوحة التحكم</a>
+  </div>
+</header>
 
-      <form method="post" action="/ai/prepare">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>اكتب الأمر باللغة الطبيعية:</label>
-        <textarea name="question" required placeholder="مثال: أنشئ موظفًا جديدًا اسمه ... في قسم الأمن">{% if question %}{{ question }}{% endif %}</textarea>
-        <div style="margin-top:.75rem">
-          <button type="submit" class="primary">تجهيز العملية</button>
-        </div>
-      </form>
-    </div>
-
-    {% if confirmation %}
-    <div class="card">
-      <h3 style="margin-top:0">مراجعة قبل التنفيذ</h3>
-      <p><strong>الملخص:</strong> {{ confirmation.summary }}</p>
-      <p><strong>العملية:</strong> {{ confirmation.action or "—" }}</p>
-
-      {% if confirmation.old_values %}
-      <h4>البيانات القديمة</h4>
-      <table>
-        {% for k, v in confirmation.old_values.items() %}
-        <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
-        {% endfor %}
-      </table>
-      {% endif %}
-
-      {% if confirmation.new_values %}
-      <h4>البيانات الجديدة</h4>
-      <table>
-        {% for k, v in confirmation.new_values.items() %}
-        <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
-        {% endfor %}
-      </table>
-      {% endif %}
-
-      {% if confirmation.risks %}
-      <h4>المخاطر / ملاحظات</h4>
-      <ul>
-        {% for r in confirmation.risks %}
-        <li>{{ r }}</li>
-        {% endfor %}
-      </ul>
-      {% endif %}
-
-      <p class="muted">{{ confirmation.message }}</p>
-
-      <form method="post" action="/ai/confirm" style="display:inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="confirmation_token" value="{{ confirmation.confirmation_token }}">
-        <button type="submit" class="success">تأكيد التنفيذ</button>
-      </form>
-      <form method="post" action="/ai/reject" style="display:inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="confirmation_token" value="{{ confirmation.confirmation_token }}">
-        <button type="submit" class="danger">رفض</button>
-      </form>
-    </div>
+<section class="ai-status {{ 'ai-ready' if (ai_status and ai_status.available) or (status and status.available) else 'ai-offline' }}">
+  <div>
+    {% if (ai_status and ai_status.available) or (status and status.available) %}
+      <strong class="badge badge-success">المساعد المحلي جاهز</strong>
+      <p class="muted" style="margin-top:6px">النموذج يعمل على الجهاز فقط · لا تُرسل بيانات الموظفين أو الرواتب خارجيًا.</p>
+    {% else %}
+      <strong class="badge badge-danger">المساعد المحلي غير متاح</strong>
+      <p class="muted" style="margin-top:6px">{{ (ai_status.message if ai_status else status.message) if (ai_status or status) else 'تحقق من تشغيل النموذج المحلي.' }}</p>
     {% endif %}
+  </div>
+</section>
 
-    {% if result %}
-    <div class="card">
-      {% if result.success %}<p class="ok">{{ result.success }}</p>{% endif %}
-      {% if result.info %}<p>{{ result.info }}</p>{% endif %}
-      {% if result.error %}<p class="err">{{ result.error }}</p>{% endif %}
+<section class="card">
+  <h2>اكتب أمرًا أو سؤالًا</h2>
+  <p class="muted mb-2">السؤال العادي يُجاب عنه مباشرة. أي أمر تعديل يُحوَّل إلى خطة واضحة ثم تختار أنت الموافقة أو الرفض.</p>
+  <form method="post" action="/ai/prepare" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>الأمر أو السؤال
+      <textarea name="question" rows="4" maxlength="2000" required placeholder="مثال: أضف موظفًا جديدًا في قسم الأمن… أو اعتمد مسير الرواتب رقم 3">{% if question %}{{ question }}{% endif %}</textarea>
+    </label>
+    <div class="actions">
+      <button type="submit" class="primary">تجهيز العملية</button>
     </div>
-    {% endif %}
-  </main>
-</body>
-</html>
+  </form>
+</section>
+
+{% if confirmation or pending %}
+{% set conf = confirmation or pending %}
+<section class="card">
+  <h2>مراجعة قبل التنفيذ</h2>
+  <p><strong>{{ conf.summary }}</strong></p>
+  <p class="muted">نوع العملية: <code>{{ conf.action or (conf.plan.action if conf.plan is defined else '—') }}</code></p>
+
+  {% set oldv = conf.old_values if conf.old_values is defined else (conf.plan.old_values if conf.plan is defined else none) %}
+  {% set newv = conf.new_values if conf.new_values is defined else (conf.plan.new_values if conf.plan is defined else none) %}
+  {% set risks = conf.risks if conf.risks is defined else (conf.plan.risks if conf.plan is defined else none) %}
+
+  {% if oldv %}
+  <h3>البيانات الحالية (قبل التعديل)</h3>
+  <div class="table-wrap mb-2">
+    <table>
+      <thead><tr><th>الحقل</th><th>القيمة</th></tr></thead>
+      <tbody>
+        {% for k, v in oldv.items() %}
+        <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if newv %}
+  <h3>البيانات الجديدة المقترحة</h3>
+  <div class="table-wrap mb-2">
+    <table>
+      <thead><tr><th>الحقل</th><th>القيمة</th></tr></thead>
+      <tbody>
+        {% for k, v in newv.items() %}
+        <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if risks %}
+  <h3>ملاحظات ومخاطر</h3>
+  <ul class="risks">
+    {% for r in risks %}
+    <li>{{ r }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if conf.message %}<p class="muted">{{ conf.message }}</p>{% endif %}
+  <p class="muted" style="font-size:12.5px">الخطة محفوظة ببصمة · صلاحيتها محدودة · التأكيد مرتبط بهذه الخطة فقط.</p>
+
+  <div class="actions">
+    <form method="post" action="/ai/confirm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="confirmation_token" value="{{ conf.confirmation_token or conf.token }}">
+      <input type="hidden" name="token" value="{{ conf.confirmation_token or conf.token }}">
+      <button type="submit" class="btn-success">تأكيد التنفيذ</button>
+    </form>
+    <form method="post" action="/ai/reject">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="confirmation_token" value="{{ conf.confirmation_token or conf.token }}">
+      <input type="hidden" name="token" value="{{ conf.confirmation_token or conf.token }}">
+      <button type="submit" class="btn-danger">رفض العملية</button>
+    </form>
+  </div>
+</section>
+{% endif %}
+
+{% if result or answer %}
+<section class="card ai-answer">
+  <h2>النتيجة</h2>
+  {% if result %}
+    {% if result.success %}<p class="badge badge-success">{{ result.success }}</p>{% endif %}
+    {% if result.info %}<p>{{ result.info }}</p>{% endif %}
+    {% if result.error %}<p class="badge badge-danger">{{ result.error }}</p>{% endif %}
+  {% else %}
+    <p>{{ answer }}</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>أمثلة سريعة</h2>
+  <ul class="muted">
+    <li>كم عدد الموظفين النشطين؟</li>
+    <li>اعتمد الإجازة رقم 12 — للمعاينة فقط.</li>
+    <li>نفذ: اعتمد مسير الرواتب رقم 3.</li>
+    <li>أضف سلفة تقسيط للموظف MY-0004 بمبلغ 3000 على 6 أشهر.</li>
+  </ul>
+</section>
+{% endblock %}

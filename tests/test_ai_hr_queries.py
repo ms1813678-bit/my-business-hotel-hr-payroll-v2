@@ -195,11 +195,11 @@ def test_employee_profile_query_reads_registered_employee(monkeypatch):
         engine.dispose()
 
 
-def test_payroll_query_detector_and_missing_month():
+def test_payroll_query_detector_and_missing_month(monkeypatch):
     assert queries.is_payroll_query_request("راتب الموظف MY-0001 لشهر 2026-11")
     engine, factory = _session()
     try:
-        queries.SessionLocal = factory
+        monkeypatch.setattr(queries, "SessionLocal", factory)
         report = queries.build_payroll_report("مسير الرواتب 2026-11")
         assert report["status"] == "not_created"
     finally:

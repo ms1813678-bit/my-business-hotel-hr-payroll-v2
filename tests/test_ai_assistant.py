@@ -57,3 +57,101 @@ def test_ai_command_supports_manual_attendance_and_safe_draft_leave_deletion():
     assert "delete_draft_leave" in ALLOWED_ACTIONS
     assert is_command_request("سجل حضور يدوي للموظف MY-0001")
     assert is_command_request("احذف مسودة الإجازة رقم 12")
+
+
+def test_ai_can_delete_only_unconfirmed_draft_leave_with_audit(monkeypatch):
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.db import Base
+    from app.models import AuditLog, Department, Employee, LeaveRecord, LeaveType
+    import app.ai_agent as agent
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    try:
+        with factory() as db:
+            dept = Department(name="Reception", active=True)
+            db.add(dept)
+            db.flush()
+            emp = Employee(
+                code="MY-9011", full_name="موظف حذف تجريبي", department_id=dept.id,
+                position="Reception", hire_date=date(2026, 1, 1), status="active",
+                basic_salary=Decimal("5000"), daily_hours=Decimal("8"),
+            )
+            leave_type = LeaveType(
+                code="annual", name_ar="سنوية", tracks_balance=True, is_paid=True, active=True,
+            )
+            db.add_all([emp, leave_type])
+            db.flush()
+            leave = LeaveRecord(
+                employee_id=emp.id, leave_type_id=leave_type.id,
+                start_date=date(2026, 11, 20), end_date=date(2026, 11, 20),
+                calendar_days=1, charged_days=Decimal("1"), reason="مسودة تجريبية",
+                status="draft", created_by="admin",
+            )
+            db.add(leave)
+            db.commit()
+            leave_id = leave.id
+
+        monkeypatch.setattr(agent, "SessionLocal", factory)
+        result = agent.execute_plan(
+            {"action": "delete_draft_leave", "record_id": leave_id, "reason": "اختبار حذف مسودة"},
+            "admin",
+        )
+        assert "تم حذف مسودة الإجازة" in result
+        with factory() as db:
+            assert db.get(LeaveRecord, leave_id) is None
+            audit = db.scalar(select(AuditLog).where(AuditLog.action == "ai_draft_leave_deleted"))
+            assert audit is not None
+            assert audit.entity_id == str(leave_id)
+    finally:
+        engine.dispose()
+
+
+def test_ai_refuses_to_delete_confirmed_leave(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.db import Base
+    from app.models import Department, Employee, LeaveRecord, LeaveType
+    import app.ai_agent as agent
+    import pytest
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    try:
+        with factory() as db:
+            dept = Department(name="Security", active=True)
+            db.add(dept)
+            db.flush()
+            emp = Employee(
+                code="MY-9012", full_name="موظف إجازة مؤكدة", department_id=dept.id,
+                position="Security", hire_date=date(2026, 1, 1), status="active",
+                basic_salary=Decimal("5000"), daily_hours=Decimal("8"),
+            )
+            leave_type = LeaveType(code="annual", name_ar="سنوية", tracks_balance=True, is_paid=True, active=True)
+            db.add_all([emp, leave_type])
+            db.flush()
+            leave = LeaveRecord(
+                employee_id=emp.id, leave_type_id=leave_type.id,
+                start_date=date(2026, 11, 20), end_date=date(2026, 11, 20),
+                calendar_days=1, charged_days=Decimal("1"), reason="إجازة مؤكدة",
+                status="confirmed", created_by="admin",
+            )
+            db.add(leave)
+            db.commit()
+            leave_id = leave.id
+
+        monkeypatch.setattr(agent, "SessionLocal", factory)
+        with pytest.raises(ValueError, match="مسودة الإجازة فقط"):
+            agent.execute_plan(
+                {"action": "delete_draft_leave", "record_id": leave_id, "reason": "اختبار منع الحذف"},
+                "admin",
+            )
+        with factory() as db:
+            assert db.get(LeaveRecord, leave_id) is not None
+    finally:
+        engine.dispose()

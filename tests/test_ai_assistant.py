@@ -84,7 +84,7 @@ def test_ai_can_delete_only_unconfirmed_draft_leave_with_audit(monkeypatch):
                 basic_salary=Decimal("5000"), daily_hours=Decimal("8"),
             )
             leave_type = LeaveType(
-                code="annual", name_ar="سنوية", tracks_balance=True, is_paid=True, active=True,
+                code="annual", name_ar="سنوية", name_en="Annual", tracks_balance=True, is_paid=True, active=True,
             )
             db.add_all([emp, leave_type])
             db.flush()

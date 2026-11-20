@@ -5,7 +5,7 @@
 **المستودع:** https://github.com/ms1813678-bit/my-business-hotel-hr-payroll-v2  
 **الإصدار المستهدف:** Version 2.2  
 **فرع العمل الحالي:** `v2/integration-baseline-2026-11-20`  
-**آخر Commit عند إنشاء الدفتر:** `8962eac6dd4c0d0ae75042ac20938791a672985b`  
+**آخر Commit عند إنشاء الدفتر:** `5cdf6c84efa5b3fa91cd73e057607f1a8496f9fd`  
 **الحالة:** تطوير واختبار — غير معتمد للإنتاج.
 
 ---
@@ -175,13 +175,23 @@
 - الحالة: مكتملة بإنشاء هذا الملف.
 - هذا الملف هو نقطة بداية كل مهمة لاحقة.
 
+### W-010 — خريطة مقارنة main وV2.2
+- الحالة: مكتملة.
+- أنشئ الملف `docs/BRANCH_INTEGRATION_MATRIX_V2_2.md` بعد مقارنة 13 Commit خاصة بـ main.
+- القرار: لا نسخ لملفات main الأساسية؛ وظائف HR وallocator وAI gateway في V2.2 أوسع. المرشح الوحيد تحسين AI UI بعد مواءمة endpoints.
+
+### W-011 — إزالة تحميل Google Fonts من صفحة الدخول
+- الحالة: قيد التنفيذ حتى نجاح CI.
+- إزالة روابط Google Fonts الخارجية من `app/templates/login.html` مع الحفاظ على تبديل اللغة.
+- إضافة assertion في `tests/test_language_routes.py` تمنع رجوع الروابط الخارجية.
+
 ---
 
 ## 6. سجل الاختبارات — أحدث نتيجة معتمدة
 
-### CI على آخر Commit موثق
-- Commit: `8962eac6dd4c0d0ae75042ac20938791a672985b`.
-- GitHub Actions Run: [44806927292](https://github.com/ms1813678-bit/my-business-hotel-hr-payroll-v2/actions/runs/44806927292).
+### CI على آخر Commit موثق قبل تعديل W-011
+- Commit: `5cdf6c84efa5b3fa91cd73e057607f1a8496f9fd`.
+- GitHub Actions Run: [44808359504](https://github.com/ms1813678-bit/my-business-hotel-hr-payroll-v2/actions/runs/44808359504).
 - Linux + PostgreSQL 16: **343 passed, 16 warnings, 0 failures**.
 - Windows runner / Python 3.11: **336 passed, 1 warning, 0 failures**.
 - PowerShell syntax: `setup.ps1`، `start.ps1`، `install_backup_tasks.ps1` نجحت.
@@ -227,7 +237,7 @@
 
 ## 9. المهمة التالية ذات الأولوية — لا تبدأ مهمة أخرى قبل إغلاقها
 
-**NEXT-001 — بناء خريطة دمج دقيقة بين `main` وفرع V2.2.**
+**NEXT-002 — تحسين واجهة AI في V2.2 اعتمادًا على تصميم main مع الحفاظ على تدفق التأكيد الحالي.**
 
 المطلوب:
 1. مراجعة Commits الفرعين منذ نقطة التفرع المشتركة.
@@ -237,7 +247,7 @@
 5. وضع ترتيب دمج انتقائي واحد، ثم تنفيذ النقل على فرع V2.2، مع اختبارات CI بعد كل دفعة منطقية.
 6. تسجيل نتيجة المقارنة والـ Commits والاختبارات هنا فورًا.
 
-**حالة NEXT-001:** لم تبدأ بعد.
+**حالة NEXT-001:** مكتملة — راجع [BRANCH_INTEGRATION_MATRIX_V2_2.md](BRANCH_INTEGRATION_MATRIX_V2_2.md).
 
 ---
 

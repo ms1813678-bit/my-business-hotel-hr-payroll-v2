@@ -9,6 +9,8 @@ def test_language_switch_persists_simplified_chinese_and_redirects_back():
         assert page.status_code == 200
         assert page.headers["content-language"] == "ar"
         assert '<html lang="ar" dir="rtl">' in page.text
+        assert "fonts.googleapis.com" not in page.text
+        assert "fonts.gstatic.com" not in page.text
 
         switched = client.get(
             "/language/zh",

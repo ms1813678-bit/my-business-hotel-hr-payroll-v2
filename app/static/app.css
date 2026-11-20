@@ -25,8 +25,8 @@
   --radius: 14px;
   --radius-sm: 10px;
   --sidebar-w: 268px;
-  /* Cairo first for clear Arabic glyphs; system fallbacks for offline */
-  --font: "Cairo", "Segoe UI", Tahoma, "Noto Sans Arabic", "Arial", sans-serif;
+  /* System fonts only: the interface remains fully usable without internet. */
+  --font: "Segoe UI", Tahoma, "Noto Sans Arabic", Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }

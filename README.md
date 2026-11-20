@@ -1,6 +1,6 @@
 # M.Y. Business Hotel — HR & Payroll System — Version 2
 
-**Independent Version 2 | M.Y. Business Hotel — Maadi, Cairo**
+**Independent Version 2.2 | M.Y. Business Hotel — Maadi, Cairo**
 
 A local-first HR and payroll application for Windows 10/11, using PostgreSQL on the hotel computer. Version 2 is developed in this repository only. The previous repository is a read-only reference and must not be modified as part of V2 work.
 

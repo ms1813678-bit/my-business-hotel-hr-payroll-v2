@@ -38,3 +38,15 @@ def test_scripts_and_user_content_are_not_modified():
     assert 'const label = "لوحة التحكم";' in rendered
     assert "<textarea>اسم الموظف</textarea>" in rendered
     assert "<p>Dashboard</p>" in rendered
+
+
+def test_base_layout_uses_no_remote_font_or_script_assets():
+    from pathlib import Path
+
+    base = Path("app/templates/base.html").read_text(encoding="utf-8")
+    css = Path("app/static/app.css").read_text(encoding="utf-8")
+
+    assert "fonts.googleapis.com" not in base
+    assert "fonts.gstatic.com" not in base
+    assert "https://" not in base
+    assert "@import url(" not in css

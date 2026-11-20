@@ -10,16 +10,19 @@ import hashlib
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
 
 from app.ai_agent import build_plan, execute_plan
 from app.db import SessionLocal
+from app.leave_workflow import leave_balance
 from app.models import (
     AICommandApproval, AIConversationMessage, AdminAccount, AuditLog,
     Employee, Department, Branch, LeaveRecord, LeaveType, AdvanceRequest,
     StaffAction, AttendanceDailyRecord, AttendanceMonth, PayrollRun,
+    LeaveBalanceTransaction,
 )
 
 APPROVAL_TTL_MINUTES = 10
@@ -110,6 +113,50 @@ def build_confirmation_preview(plan: dict[str, Any]) -> dict[str, Any]:
             else:
                 new_values = {"status": "deleted"}
                 risks.append("الحذف متاح لمسودة غير معتمدة فقط، بشرط عدم وجود حركة رصيد مرتبطة. سيظل سجل التدقيق محفوظًا.")
+
+        elif action == "adjust_leave_balance":
+            employee_id = int(plan.get("employee_id") or 0)
+            leave_type_id = int(plan.get("leave_type_id") or 0)
+            employee = db.scalar(select(Employee).where(Employee.id == employee_id).with_for_update())
+            leave_type = db.scalar(select(LeaveType).where(LeaveType.id == leave_type_id).with_for_update())
+            if employee is None or leave_type is None:
+                raise ValueError("الموظف أو نوع الإجازة المستهدف غير موجود.")
+            if not leave_type.tracks_balance:
+                raise ValueError("نوع الإجازة المحدد لا يستخدم رصيدًا.")
+            current_balance = leave_balance(db, employee_id, leave_type_id)
+            delta = Decimal(str(plan.get("balance_days") or "0")).quantize(Decimal("0.01"))
+            transaction_type = str(plan.get("transaction_type") or "adjustment")
+            opening_exists = db.scalar(select(LeaveBalanceTransaction.id).where(
+                LeaveBalanceTransaction.employee_id == employee_id,
+                LeaveBalanceTransaction.leave_type_id == leave_type_id,
+                LeaveBalanceTransaction.transaction_type == "opening",
+            ).limit(1)) is not None
+            resulting_balance = current_balance + delta
+            if delta == 0:
+                raise ValueError("تعديل الرصيد يجب أن يكون بقيمة غير صفرية.")
+            if transaction_type == "opening" and opening_exists:
+                raise ValueError("تم تسجيل الرصيد الافتتاحي من قبل؛ استخدم تعديلًا بدلًا منه.")
+            if transaction_type == "adjustment" and resulting_balance < 0:
+                raise ValueError("التعديل المقترح سيجعل رصيد الإجازة سالبًا.")
+            old = {
+                "employee_code": employee.code,
+                "employee_name": employee.full_name,
+                "leave_type": leave_type.name_ar,
+                "current_balance": str(current_balance),
+                "opening_balance_exists": opening_exists,
+            }
+            new_values = {
+                "transaction_type": transaction_type,
+                "days_delta": str(delta),
+                "resulting_balance": str(resulting_balance),
+                "reason": _display_value(plan.get("reason")),
+            }
+            snapshot = {
+                "action": action,
+                "target": {"type": "leave_balance", "employee_id": employee_id, "leave_type_id": leave_type_id},
+                "current": old,
+            }
+            risks.append("سيُسجل التعديل كحركة رصيد دائمة في دفتر الإجازات، ولا تُمحى الحركات السابقة.")
 
         elif action in {"create_advance", "approve_advance", "reject_advance", "mark_advance_paid"}:
             advance_id = plan.get("advance_id")

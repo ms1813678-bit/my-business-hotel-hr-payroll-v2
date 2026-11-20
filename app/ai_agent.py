@@ -18,7 +18,7 @@ from app.ai_assistant import ask_local_model_json, local_model_status
 from app.employee_codes import allocate_employee_code
 from app.advance_workflow import approve_advance, create_advance, mark_advance_paid, reject_advance
 from app.db import SessionLocal
-from app.leave_workflow import add_balance_entry, cancel_leave, confirm_leave
+from app.leave_workflow import add_balance_entry, cancel_leave, confirm_leave, leave_balance
 from app.models import (
     AdvanceRequest,
     AttendanceDailyRecord,
@@ -402,6 +402,15 @@ def execute_plan(plan: dict[str, Any], actor: str) -> str:
             leave_type = db.get(LeaveType, int(plan["leave_type_id"]))
             days = _decimal(plan["balance_days"], "الرصيد")
             if employee is None or leave_type is None: raise ValueError("الموظف أو نوع الإجازة غير موجود.")
+            expected_snapshot = plan.get("_confirmation_snapshot")
+            expected_balance = (
+                expected_snapshot.get("current", {}).get("current_balance")
+                if isinstance(expected_snapshot, dict) else None
+            )
+            if expected_balance is not None:
+                actual_balance = str(leave_balance(db, employee.id, leave_type.id))
+                if actual_balance != str(expected_balance):
+                    raise ValueError("تغير رصيد الإجازة بعد عرض المعاينة. أعد تجهيز الأمر وراجع القيم الجديدة.")
             add_balance_entry(db, employee_id=employee.id, leave_type=leave_type,
                               transaction_type=str(plan.get("transaction_type") or "adjustment"),
                               days_delta=days, reason=reason, actor=actor)

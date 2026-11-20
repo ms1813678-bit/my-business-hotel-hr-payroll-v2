@@ -108,3 +108,85 @@ def test_stale_confirmation_snapshot_stays_invalidated_and_never_executes(monkey
             assert approval.approved_at is None
     finally:
         engine.dispose()
+
+
+def test_leave_balance_preview_shows_current_and_resulting_balance_and_rejects_stale_execution(monkeypatch):
+    from datetime import date
+    from decimal import Decimal
+
+    import pytest
+    from sqlalchemy import create_engine, select, func
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.db import Base
+    from app.models import Department, Employee, LeaveType, LeaveBalanceTransaction
+    import app.ai_gateway as gateway
+    import app.ai_agent as agent
+    from app.leave_workflow import leave_balance
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    try:
+        with factory.begin() as db:
+            department = Department(name="Reception", active=True)
+            leave_type = LeaveType(
+                code="annual", name_ar="سنوية", name_en="Annual",
+                is_paid=True, tracks_balance=True, active=True,
+            )
+            db.add_all([department, leave_type])
+            db.flush()
+            employee = Employee(
+                code="MY-9020", full_name="موظف رصيد تجريبي",
+                department_id=department.id, position="Reception",
+                hire_date=date(2026, 1, 1), status="active",
+                basic_salary=Decimal("5000"), daily_hours=Decimal("8"),
+            )
+            db.add(employee)
+            db.flush()
+            db.add(LeaveBalanceTransaction(
+                employee_id=employee.id, leave_type_id=leave_type.id,
+                transaction_type="opening", days_delta=Decimal("5"),
+                reason="رصيد افتتاحي تجريبي", created_by="test",
+            ))
+            employee_id, leave_type_id = employee.id, leave_type.id
+
+        monkeypatch.setattr(gateway, "SessionLocal", factory)
+        monkeypatch.setattr(agent, "SessionLocal", factory)
+        plan = {
+            "action": "adjust_leave_balance",
+            "employee_id": employee_id,
+            "leave_type_id": leave_type_id,
+            "balance_days": "2",
+            "transaction_type": "adjustment",
+            "reason": "تصحيح رصيد تجريبي",
+        }
+        preview = gateway.build_confirmation_preview(plan)
+        assert preview["old_values"]["current_balance"] == "5.00"
+        assert preview["new_values"]["resulting_balance"] == "7.00"
+
+        # Simulate another approved HR change after the preview was shown.
+        with factory.begin() as db:
+            leave_type = db.get(LeaveType, leave_type_id)
+            from app.leave_workflow import add_balance_entry
+            add_balance_entry(
+                db, employee_id=employee_id, leave_type=leave_type,
+                transaction_type="adjustment", days_delta=Decimal("1"),
+                reason="تغيير متزامن", actor="other-admin",
+            )
+
+        plan["_confirmation_snapshot"] = preview["snapshot"]
+        with pytest.raises(ValueError, match="تغير رصيد الإجازة بعد عرض المعاينة"):
+            agent.execute_plan(plan, "hr-admin")
+
+        with factory() as db:
+            assert leave_balance(db, employee_id, leave_type_id) == Decimal("6.00")
+            count = db.scalar(select(func.count()).select_from(LeaveBalanceTransaction))
+            assert count == 2
+    finally:
+        engine.dispose()

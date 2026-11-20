@@ -647,3 +647,14 @@ def test_concurrent_postgres_attendance_approval_allows_exactly_one_winner(postg
         assert final_record.approved_by == "hr-one"
         assert db.query(AttendanceDailyRecord).count() == 1
         assert db.query(AuditLog).filter_by(action="attendance_day_approved").count() == 1
+
+
+def test_ai_conversation_history_migration_creates_actor_index(postgres_schema):
+    migrate(postgres_schema, "head")
+    inspector = inspect(postgres_schema)
+
+    assert "ai_conversation_messages" in inspector.get_table_names()
+    columns = {column["name"] for column in inspector.get_columns("ai_conversation_messages")}
+    assert {"id", "actor", "role", "content", "created_at"}.issubset(columns)
+    indexes = {item["name"] for item in inspector.get_indexes("ai_conversation_messages")}
+    assert "ix_ai_conversation_messages_actor" in indexes

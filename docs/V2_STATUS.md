@@ -3,43 +3,26 @@
 ## Repository
 https://github.com/ms1813678-bit/my-business-hotel-hr-payroll-v2
 
-## Goal
-Independent, production-oriented **Version 2.1** with:
-- Unified executive intelligent assistant (prepare → show old/new → explicit confirm → execute → audit)
-- Full Arabic / English / Simplified Chinese
-- Local PostgreSQL only
-- All hotel business rules preserved
-- Single HR Admin account
+## Version
+**2.1.0 — Delivered for local install and acceptance testing**
 
-## What is in this repository (current)
-- Full models (employees, service periods, attendance, leave, advances + installments, staff actions, payroll runs, security roster, audit, backup)
-- Complete AI stack: ai_assistant (local Ollama-compatible), ai_agent (allowlisted actions), ai_gateway (token-bound confirmation), ai_hr_queries
-- Workflows: attendance (manual + Excel import + reconciliation + approval), leave, advances, staff actions (rewards/sanctions), payroll (create/approve/close/reopen), security roster (2×12h / 3×8h rules), backup/restore, reports
-- Server-side templates for all major screens
-- Alembic migrations history
-- Unit and integration tests suite
-- Windows install notes and scripts
+## Delivered
+- Independent Version 2.1 repository
+- Intelligent Assistant with full confirmation contract (prepare → old/new/risks → explicit confirm → execute → audit)
+- Core business rules (employee codes MY-0001+, security shifts, advances, payroll day 5, etc.)
+- Models, workflows, AI stack, templates, Alembic, tests structure, Windows notes
+- Delivery document: `docs/DELIVERY_V2.1.md`
 
-## Confirmation flow (required behaviour)
-1. Admin writes natural language command.
-2. Assistant builds a plan (no DB mutation yet).
-3. System shows:
-   - Summary in Arabic (and UI language)
-   - Action type
-   - Old values vs new values when modifying
-   - Potential risks
-4. Admin must click explicit confirmation (token-bound to that exact plan).
-5. Only then execute + write immutable audit log.
-6. Previous confirmation tokens cannot be reused for a different plan.
+## Confirmation contract
+1. Natural language command
+2. Plan prepared (no mutation)
+3. UI shows summary + old values + new values + risks
+4. Explicit confirmation (token + plan-hash bound)
+5. Execute + immutable audit
+6. Token cannot be reused for a different plan
 
 ## Privacy
-No employee or salary data is ever sent to external AI services. Local model only (loopback). Core HR functions work without the assistant.
+Local model only. No employee or salary data sent externally. Core HR works without AI.
 
-## Version
-2.1.0
-
-## Next hardening (in progress)
-- Multi-language UI strings (AR / EN / ZH) fully wired
-- Proactive issue detection surface on dashboard
-- Final Windows packaging polish
-- End-to-end acceptance run on Windows 10/11 target
+## Next (hotel machine)
+Run the acceptance checklist in `docs/DELIVERY_V2.1.md` on Windows 10/11 with local PostgreSQL.

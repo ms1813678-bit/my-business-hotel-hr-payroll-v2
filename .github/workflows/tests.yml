@@ -46,6 +46,75 @@ jobs:
       - name: Run complete test suite
         run: python -m pytest -v
 
+  package-source:
+    name: Package verified source ZIP
+    needs: [test, windows]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Build source archive and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          git archive --format=zip --prefix=M.Y.Business.Hotel.HR.V2.2/ HEAD \
+            -o dist/MY_Business_Hotel_HR_V2.2-source.zip
+          sha256sum dist/MY_Business_Hotel_HR_V2.2-source.zip \
+            > dist/MY_Business_Hotel_HR_V2.2-source.zip.sha256
+          unzip -l dist/MY_Business_Hotel_HR_V2.2-source.zip | grep -E '(^|/)\.env
+  windows:
+    name: Windows runner compatibility (Python 3.11)
+    runs-on: windows-latest
+    env:
+      DATABASE_URL: postgresql+psycopg://ci_placeholder:ci_placeholder@127.0.0.1:5432/ci_placeholder
+      SESSION_SECRET: ci-test-only-session-secret-not-for-production
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project and development dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Parse Windows PowerShell scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $scriptFiles = @(Get-ChildItem -Path "scripts/windows" -Filter "*.ps1" -File -Recurse)
+          if ($scriptFiles.Count -eq 0) {
+            throw "No Windows PowerShell scripts were found."
+          }
+          foreach ($scriptFile in $scriptFiles) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $scriptFile.FullName,
+              [ref]$tokens,
+              [ref]$parseErrors
+            ) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              $messages = $parseErrors | ForEach-Object { $_.Message }
+              throw ("PowerShell syntax errors in {0}: {1}" -f $scriptFile.Name, ($messages -join "; "))
+            }
+            Write-Host ("PowerShell syntax OK: {0}" -f $scriptFile.Name)
+          }
+      - name: Run platform-independent test suite
+        run: python -m pytest -v --ignore=tests/test_postgres_migrations.py
+ && exit 1 || true
+      - name: Upload verified source package
+        uses: actions/upload-artifact@v4
+        with:
+          name: MY-Business-Hotel-HR-Version-2.2-Source
+          path: |
+            dist/MY_Business_Hotel_HR_V2.2-source.zip
+            dist/MY_Business_Hotel_HR_V2.2-source.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
   windows:
     name: Windows runner compatibility (Python 3.11)
     runs-on: windows-latest

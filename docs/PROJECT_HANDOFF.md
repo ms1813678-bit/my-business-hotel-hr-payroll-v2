@@ -1,49 +1,54 @@
-# Project handoff and current decisions
+# تسليم مشروع M.Y. Business Hotel HR & Payroll — Version 2.2
 
-## Current integration branch
-- Branch: feature/bilingual-ui-rtl-ltr
-- Source baseline: main at daeed7a50e272cf155e4797bca07c84276afa237
-- Target branch: main
-- This is the controlled final-acceptance track. Do not merge it to main until all acceptance gates are green and the owner explicitly approves the merge.
+## المستودع والنسخة
+- المستودع: https://github.com/ms1813678-bit/my-business-hotel-hr-payroll-v2
+- الفرع الجاري تسليمه للاختبار: `v2/integration-baseline-2026-11-20`
+- Commit الكود الذي اجتاز CI: `8a47fa4b93dc42afa5734669dec2c38a85e6da7c`
+- Package version: `2.2.0`
+- المستودع القديم مرجع للقراءة فقط؛ التطوير هنا في المستودع الجديد.
 
-## Confirmed business decisions
-1. Reports are manual only.
-2. Regular monthly advances alone are limited to 25% of basic salary.
-3. Installment/large advances are independent of the 25% limit and may use 1–36 installments.
-4. Advance installment accounting starts in the request month; payout date is the 5th of the following month.
-5. Payroll advance deductions consume the installment ledger, never the full advance amount. Closing applies installments; reopening reverses them.
-6. Positive overtime requires explicit administrator approval.
-7. Security attendance requires at least two active guards every day. Exactly two guards use 12-hour coverage; three or more use 8-hour coverage.
-8. Attendance remains evidence-first: source files are retained, daily records require HR approval, and monthly approval requires both source imports and explicit coverage confirmation.
-9. Employee codes are never reused. Rehire preserves the code but creates a new service period.
+## نطاق النسخة
+- تطبيق HR & Payroll محلي على Windows 10/11 مع PostgreSQL محلية.
+- مسؤول واحد: HR Manager / System Administrator.
+- واجهة عربية RTL، إنجليزية LTR، وصينية مبسطة LTR.
+- AI محلي عبر Ollama على loopback فقط. كل تعديل يتطلب معاينة وموافقة صريحة وسجل تدقيق.
+- الحضور يدوي أو Excel، مع الاحتفاظ بالمصدر ومراجعة الفروق قبل الاعتماد.
+- لا حسابات للموظفين أو المديرين أو المشرفين، ولا GPS أو حضور موبايل، ولا مخازن أو مشتريات.
+- التقارير يختارها مسؤول HR يدويًا، ويمكن تصديرها Excel/PDF وحفظها محليًا. لا إرسال مجدول بالبريد.
 
-## Latest automated verification after local-database security guard (2026-11-20)
-- Branch: `feature/bilingual-ui-rtl-ltr`.
-- Verified commit: `eb027b46776461c4c1dc8e6bfea1199da083408a`.
-- GitHub Actions run: [44737576171](https://github.com/ms1813678-bit/my-business-hotel-hr-payroll-system/actions/runs/44737576171) — completed successfully.
-- Linux + PostgreSQL 16: 330 passed, 16 warnings, zero failures.
-- Windows runner: 323 passed, 1 warning, zero failures.
-- PowerShell syntax checks: `setup.ps1`, `start.ps1`, `install_backup_tasks.ps1` passed.
-- Added application-level and Windows setup validation to reject remote PostgreSQL hosts; only localhost, 127.0.0.1, and ::1 are accepted.
-- This proves CI compatibility only. It does not replace installation and backup/restore acceptance on the hotel PC.
+## قواعد تشغيل مؤكدة
+- أكواد الموظفين تبدأ MY-0001 ولا يعاد استخدام الكود؛ إعادة التعيين تفتح فترة خدمة جديدة.
+- الأمن: فردان نشطان = ورديتان 12 ساعة (08:00–20:00، 20:00–08:00)، ثلاثة فأكثر = ثلاث ورديات 8 ساعات. لا يقل المكلفون يوميًا عن اثنين، ولا فجوات أو تداخل.
+- السلفة العادية: الطلب من يوم 15 إلى 22 وبحد أقصى 25% من الأساسي المؤهل للشهر.
+- سلفة الأقساط منفصلة، من 1 إلى 36 قسطًا، ودفتر الأقساط يمنع الازدواج عند إغلاق/إعادة فتح الراتب.
+- الراتب يوم 5 من الشهر التالي؛ أجر الساعة = الأساسي ÷ (ساعات اليوم × 30). الغياب بأيام الشهر الفعلية.
+- لا ضرائب أو تأمينات افتراضية؛ تدخل أو تعتمد يدويًا.
+- الإضافي والمكافآت والجزاءات تخضع لمراجعة واعتماد HR وفق السجلات.
 
-## Final acceptance gates
-1. Full automated test suite passes on the final-acceptance branch, including PostgreSQL migration/concurrency tests.
-2. Windows runner installation/compatibility passes.
-3. Real Windows 10 or Windows 11 + PostgreSQL installation is executed on the hotel target PC.
-4. Backup creation, integrity validation, restore, and rollback behavior are executed against the target PostgreSQL environment and backup drive.
-5. Synthetic end-to-end business flow passes: employee/service period -> attendance -> security roster -> leave -> advance/installment ledger -> sanctions/rewards -> payroll -> payment -> reports -> backup/restore.
-6. AI assistant approval-gate tests pass and the application remains usable with local AI unavailable.
-7. Arabic/English/Simplified Chinese translations and RTL/LTR UI regression are checked.
-8. Only after all gates pass may `feature/bilingual-ui-rtl-ltr` be merged to `main` with explicit owner approval.
+## نتيجة الاختبارات على Commit الكود
+GitHub Actions Run [44811054829](https://github.com/ms1813678-bit/my-business-hotel-hr-payroll-v2/actions/runs/44811054829):
+- Linux + PostgreSQL 16: **346 passed, 17 warnings, 0 failures**.
+- Windows runner / Python 3.11: **338 passed, 1 warning, 0 failures**.
+- PowerShell syntax checks: setup, start, backup task scripts passed.
 
-## Repository hygiene verification
-- The new repository contains no tracked `.env`, database, spreadsheet, PDF, backup archive, private key, local data, or `var/` files.
-- `.gitignore` excludes `.env`, `data/`, `backups/`, `var/`, virtual environments, build output, caches, logs, and temporary files.
-- The stale `.github/workflows/release-ci.yml` file and old `tests/test_monthly_report_schedule.py` name were removed from this repository; the manual-report CLI test remains under `tests/test_manual_report_cli.py`.
-- The old repository was left unchanged as the historical source; no source files were removed from it.
+## طريقة التثبيت على Windows
+1. ثبّت Python 3.11 مع Python Launcher.
+2. ثبّت PostgreSQL 16 محليًا وأنشئ قاعدة بيانات ومستخدمًا محليين.
+3. فك ملف ZIP وافتح PowerShell داخل مجلد المشروع.
+4. نفّذ:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   .\scripts\windows\setup.ps1
+   ```
+5. اتبع المطالبات لإعداد اتصال قاعدة البيانات وإنشاء مسؤول HR الأول.
+6. شغّل الاختصار الذي ينشئه البرنامج على سطح المكتب؛ يفتح الواجهة على `http://127.0.0.1:8000`.
 
-## Verification notes
-- PostgreSQL migration tests are in tests/test_postgres_migrations.py.
-- No production data should be entered before final acceptance.
-- main remains unchanged by this acceptance track.
+لا تشارك ملف `.env` أو كلمة مرور قاعدة البيانات. يجب أن يكون PostgreSQL على نفس الجهاز.
+
+## ما الذي لم يُختبر بعد
+- تثبيت وتشغيل فعلي على جهاز Hasee بنظام Windows 10.
+- دورة بيانات وهمية كاملة من تسجيل الموظف إلى إغلاق مسير الرواتب والدفع والتقارير.
+- النسخ الاحتياطي والاستعادة والتراجع على بيئة Windows المحلية.
+- قبول الاستخدام دون إنترنت، وتوافر نموذج Ollama محليًا إذا استُخدم.
+
+**الحالة:** اجتاز الاختبارات الآلية؛ ليس بعدُ مقبولًا للاستخدام الإنتاجي. لا تُدخل بيانات الموظفين الحقيقية حتى إنهاء القبول المحلي.

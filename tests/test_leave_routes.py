@@ -411,6 +411,7 @@ def test_advance_window_cap_approval_payment_and_next_payroll_month(leave_client
             "request_date": other_month.isoformat(),
             "amount": "100.00",
             "reason": "Synthetic cross-month outstanding cap test",
+            "submission_key": uuid4().hex,
         },
         follow_redirects=False,
     )

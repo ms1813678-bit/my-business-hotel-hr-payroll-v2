@@ -27,6 +27,13 @@ def _filtered_date(column, start_date: date, end_date: date):
     return (column >= start_date, column <= end_date)
 
 
+def _excel_datetime(value):
+    """Remove timezone metadata from datetimes before writing Excel cells."""
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        return value.replace(tzinfo=None)
+    return value
+
+
 def _write_sheet(workbook: Workbook, title: str, headers: list[str], rows: list[tuple]) -> None:
     sheet = workbook.create_sheet(title=title[:31])
     sheet.append(headers)
@@ -155,7 +162,7 @@ def build_hr_workbook(
         ["Date", "Employee code", "Employee", "Leave type ID", "Transaction", "Days delta", "Reason", "Recorded by"],
         [
             (
-                item.created_at,
+                _excel_datetime(item.created_at),
                 employee_map[item.employee_id].code if item.employee_id in employee_map else "",
                 employee_map[item.employee_id].full_name if item.employee_id in employee_map else "",
                 item.leave_type_id,
@@ -180,7 +187,7 @@ def build_hr_workbook(
         ["Date", "Employee code", "Employee", "Type", "Category", "Title", "Financial", "Amount", "Payroll month", "Status", "Reason"],
         [
             (
-                item.created_at,
+                _excel_datetime(item.created_at),
                 employee_map[item.employee_id].code if item.employee_id in employee_map else "",
                 employee_map[item.employee_id].full_name if item.employee_id in employee_map else "",
                 item.kind,
@@ -215,8 +222,8 @@ def build_hr_workbook(
                 float(item.amount),
                 float(item.salary_basis),
                 item.status,
-                item.paid_at,
-                item.deducted_at,
+                _excel_datetime(item.paid_at),
+                _excel_datetime(item.deducted_at),
                 item.reason,
             )
             for item in advances

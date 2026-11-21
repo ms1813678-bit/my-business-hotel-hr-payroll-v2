@@ -365,3 +365,65 @@ def test_duplicate_advance_form_submission_key_creates_only_one_request(advance_
         assert len(submitted_actions) == 1
         assert len(idempotency_records) == 1
         assert idempotency_records[0].new_value == str(requests[0].id)
+
+def test_duplicate_approval_rejection_and_payment_posts_do_not_duplicate_actions(advance_client):
+    client = advance_client
+    login(client)
+    token = csrf(client.get("/advances"))
+
+    # Use installment advances so these requests do not consume the regular cap.
+    for amount in ("1000.00", "1100.00"):
+        assert submit_advance(
+            client, token, amount=amount, advance_type="installment"
+        ).status_code == 303
+
+    with client.test_session_factory() as db:
+        request_ids = db.scalars(
+            select(AdvanceRequest.id).order_by(AdvanceRequest.id)
+        ).all()
+
+    approve_url = f"/advances/{request_ids[0]}/approve"
+    approve_data = {"csrf_token": token, "installment_count": "3"}
+    assert client.post(approve_url, data=approve_data, follow_redirects=False).status_code == 303
+    duplicate_approval = client.post(
+        approve_url, data=approve_data, follow_redirects=False
+    )
+    assert duplicate_approval.status_code == 303
+    assert "error=approve" in duplicate_approval.headers["location"]
+
+    paid_url = f"/advances/{request_ids[0]}/paid"
+    assert client.post(
+        paid_url, data={"csrf_token": token}, follow_redirects=False
+    ).status_code == 303
+    duplicate_payment = client.post(
+        paid_url, data={"csrf_token": token}, follow_redirects=False
+    )
+    assert duplicate_payment.status_code == 303
+    assert "error=paid" in duplicate_payment.headers["location"]
+
+    reject_url = f"/advances/{request_ids[1]}/reject"
+    reject_data = {"csrf_token": token, "reason": "Synthetic rejection"}
+    assert client.post(
+        reject_url, data=reject_data, follow_redirects=False
+    ).status_code == 303
+    duplicate_rejection = client.post(
+        reject_url, data=reject_data, follow_redirects=False
+    )
+    assert duplicate_rejection.status_code == 303
+    assert "error=reject" in duplicate_rejection.headers["location"]
+
+    with client.test_session_factory() as db:
+        requests = db.scalars(
+            select(AdvanceRequest).order_by(AdvanceRequest.id)
+        ).all()
+        assert [item.status for item in requests] == ["paid", "rejected"]
+        for action in ("advance_approved", "advance_paid", "advance_rejected"):
+            assert len(db.scalars(
+                select(AuditLog).where(AuditLog.action == action)
+            ).all()) == 1
+        assert len(db.scalars(
+            select(AdvanceInstallment).where(
+                AdvanceInstallment.advance_request_id == request_ids[0]
+            )
+        ).all()) == 3
+

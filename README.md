@@ -18,7 +18,7 @@ A local-first HR and payroll application for Windows 10/11, using PostgreSQL on 
 
 - Employee codes start at MY-0001 and are never reused. Rehire retains the same employee code and creates a new service period.
 - Attendance is entered manually or imported from fingerprint Excel; discrepancies are reviewed before approval.
-- Security shift model is determined by the count of active guards assigned to work: exactly two use 08:00–20:00 and 20:00–08:00; three or more use configured 8-hour shifts. Never fewer than two assigned to work, no gaps, no overlap. Overnight shifts belong to their start date.
+- HR manually uploads the security roster as an Excel file, specifying each guard's shift start time or OFF for each day; the system does not generate or assign shifts. The shift model is determined by the number of active security guards registered in the system, regardless of OFF entries: exactly two active guards use 12-hour shifts (08:00–20:00 and 20:00–08:00), while three or more use 8-hour shifts (08:00–16:00, 16:00–00:00, and 00:00–08:00). OFF does not change the shift model. The system validates the uploaded roster and presents each day for manual HR approval before saving; after approval, the roster is checked against fingerprint clock-in and clock-out records. Never fewer than two guards assigned per day, no gaps, and no overlap. Overnight shifts belong to their start date.
 - Regular advances: request window 15–22 and maximum 25% of eligible basic salary for the accounting month. Installment advances are separate, 1–36 installments.
 - Payroll is normally paid on day 5 of the following month. Hourly rate = basic salary ÷ (daily hours × 30). Absence uses actual calendar days; partial first month is prorated by actual calendar days.
 - Overtime requires HR approval. Taxes and insurance are manually entered/approved; no guessed rates.
@@ -49,7 +49,7 @@ Use synthetic data only until all V2 acceptance checks pass. See:
 
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.\\.venv\\Scripts\\Activate.ps1
 python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 # Configure a local PostgreSQL DATABASE_URL and a unique SESSION_SECRET.

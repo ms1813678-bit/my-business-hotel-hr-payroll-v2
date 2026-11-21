@@ -417,6 +417,7 @@ def _restore_archive_contents(
                     "WHERE datname = current_database() AND pid <> pg_backend_pid()"
                 )
                 cursor.execute("DROP SCHEMA IF EXISTS public CASCADE")
+                cursor.execute("CREATE SCHEMA IF NOT EXISTS public")
 
         restore_command = [
             pg_restore,

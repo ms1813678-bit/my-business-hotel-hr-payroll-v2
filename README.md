@@ -49,7 +49,7 @@ Use synthetic data only until all V2 acceptance checks pass. See:
 
 ```powershell
 py -3.11 -m venv .venv
-.\\.venv\\Scripts\\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 # Configure a local PostgreSQL DATABASE_URL and a unique SESSION_SECRET.

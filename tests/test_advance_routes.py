@@ -305,9 +305,14 @@ def test_regular_advance_approval_forces_one_installment_even_when_forged(advanc
     login(client)
     token = csrf(client.get("/advances"))
     assert submit_advance(client, token, amount="1250.00").status_code == 303
+    assert submit_advance(
+        client, token, amount="6000.00", advance_type="installment"
+    ).status_code == 303
 
     with client.test_session_factory() as db:
-        request_id = db.scalar(select(AdvanceRequest.id))
+        request_id = db.scalar(
+            select(AdvanceRequest.id).where(AdvanceRequest.advance_type == "regular")
+        )
 
     approved = client.post(
         f"/advances/{request_id}/approve",

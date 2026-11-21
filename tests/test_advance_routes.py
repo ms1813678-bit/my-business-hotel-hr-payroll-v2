@@ -309,6 +309,10 @@ def test_regular_advance_approval_forces_one_installment_even_when_forged(advanc
         client, token, amount="6000.00", advance_type="installment"
     ).status_code == 303
 
+    page_before_approval = client.get("/advances")
+    assert 'type="hidden" name="installment_count" value="1"' in page_before_approval.text
+    assert 'name="installment_count" min="1" max="36"' in page_before_approval.text
+
     with client.test_session_factory() as db:
         request_id = db.scalar(
             select(AdvanceRequest.id).where(AdvanceRequest.advance_type == "regular")
@@ -331,11 +335,6 @@ def test_regular_advance_approval_forces_one_installment_even_when_forged(advanc
         assert request.status == "approved"
         assert len(rows) == 1
         assert rows[0].installment_number == 1
-
-    page = client.get("/advances")
-    assert 'type="hidden" name="installment_count" value="1"' in page.text
-    assert 'name="installment_count" min="1" max="36"' in page.text
-
 
 def test_duplicate_advance_form_submission_key_creates_only_one_request(advance_client):
     client = advance_client

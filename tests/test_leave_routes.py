@@ -2,6 +2,7 @@
 import re
 from datetime import date, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -345,6 +346,7 @@ def test_advance_window_cap_approval_payment_and_next_payroll_month(leave_client
             "request_date": requested_on.isoformat(),
             "amount": "1200.00",
             "reason": "Synthetic advance request",
+            "submission_key": uuid4().hex,
         },
         follow_redirects=False,
     )
@@ -359,6 +361,7 @@ def test_advance_window_cap_approval_payment_and_next_payroll_month(leave_client
             "request_date": requested_on.isoformat(),
             "amount": "100.00",
             "reason": "Synthetic request exceeding remaining cap",
+            "submission_key": uuid4().hex,
         },
         follow_redirects=False,
     )
@@ -408,6 +411,7 @@ def test_advance_window_cap_approval_payment_and_next_payroll_month(leave_client
             "request_date": other_month.isoformat(),
             "amount": "100.00",
             "reason": "Synthetic cross-month outstanding cap test",
+            "submission_key": uuid4().hex,
         },
         follow_redirects=False,
     )
@@ -442,6 +446,7 @@ def test_advance_request_outside_window_and_unauthorized_access_are_rejected(lea
             "request_date": invalid_date.isoformat(),
             "amount": "500.00",
             "reason": "Synthetic invalid-window request",
+            "submission_key": uuid4().hex,
         },
         follow_redirects=False,
     )
@@ -482,6 +487,7 @@ def test_installment_advance_exceeds_regular_cap_and_uses_request_month_schedule
             "amount": "6000.00",
             "advance_type": "installment",
             "reason": "Synthetic large advance with installments",
+            "submission_key": uuid4().hex,
         },
         follow_redirects=False,
     )

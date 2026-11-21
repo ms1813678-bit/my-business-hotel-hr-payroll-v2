@@ -2,6 +2,7 @@
 import re
 from datetime import date as real_date
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -91,7 +92,10 @@ def login(client):
     assert response.status_code == 303
 
 
-def submit_advance(client, token, amount="1250.00", request_date="2026-11-17", advance_type="regular"):
+def submit_advance(
+    client, token, amount="1250.00", request_date="2026-11-17",
+    advance_type="regular", submission_key=None,
+):
     return client.post(
         "/advances",
         data={
@@ -101,6 +105,7 @@ def submit_advance(client, token, amount="1250.00", request_date="2026-11-17", a
             "amount": amount,
             "advance_type": advance_type,
             "reason": "Synthetic advance test request",
+            "submission_key": submission_key or uuid4().hex,
         },
         follow_redirects=False,
     )
@@ -238,3 +243,187 @@ def test_installment_advance_bypasses_25_percent_cap_and_creates_schedule(advanc
             real_date(2027, 1, 1), real_date(2027, 2, 1),
             real_date(2027, 3, 1), real_date(2027, 4, 1),
         ]
+
+
+
+def test_advance_page_renders_employee_without_any_advances(advance_client):
+    client = advance_client
+    login(client)
+    page = client.get("/advances")
+    assert page.status_code == 200
+    assert "MY-TEST-ADV-0001" in page.text
+    assert "1250.00 ج" in page.text
+    assert "0.00 ج" in page.text
+
+
+def test_advance_statuses_are_translated_to_arabic(advance_client):
+    client = advance_client
+    login(client)
+    token = csrf(client.get("/advances"))
+
+    assert submit_advance(client, token, amount="1000.00").status_code == 303
+    assert submit_advance(client, token, amount="1500.00", advance_type="installment").status_code == 303
+    assert submit_advance(client, token, amount="2000.00", advance_type="installment").status_code == 303
+    assert submit_advance(client, token, amount="2500.00", advance_type="installment").status_code == 303
+
+    with client.test_session_factory() as db:
+        request_ids = db.scalars(
+            select(AdvanceRequest.id).order_by(AdvanceRequest.id)
+        ).all()
+
+    assert client.post(
+        f"/advances/{request_ids[1]}/approve",
+        data={"csrf_token": token, "installment_count": "6"},
+        follow_redirects=False,
+    ).status_code == 303
+    assert client.post(
+        f"/advances/{request_ids[2]}/approve",
+        data={"csrf_token": token, "installment_count": "1"},
+        follow_redirects=False,
+    ).status_code == 303
+    assert client.post(
+        f"/advances/{request_ids[2]}/paid",
+        data={"csrf_token": token},
+        follow_redirects=False,
+    ).status_code == 303
+    assert client.post(
+        f"/advances/{request_ids[3]}/reject",
+        data={"csrf_token": token, "reason": "Synthetic rejection"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    page = client.get("/advances")
+    assert page.status_code == 200
+    for label in ("معلقة", "معتمدة", "مصروفة", "مرفوضة"):
+        assert label in page.text
+    for stored_status in (">pending<", ">approved<", ">paid<", ">rejected<"):
+        assert stored_status not in page.text
+
+
+def test_regular_advance_approval_forces_one_installment_even_when_forged(advance_client):
+    client = advance_client
+    login(client)
+    token = csrf(client.get("/advances"))
+    assert submit_advance(client, token, amount="1250.00").status_code == 303
+    assert submit_advance(
+        client, token, amount="6000.00", advance_type="installment"
+    ).status_code == 303
+
+    page_before_approval = client.get("/advances")
+    assert 'type="hidden" name="installment_count" value="1"' in page_before_approval.text
+    assert 'name="installment_count" min="1" max="36"' in page_before_approval.text
+
+    with client.test_session_factory() as db:
+        request_id = db.scalar(
+            select(AdvanceRequest.id).where(AdvanceRequest.advance_type == "regular")
+        )
+
+    approved = client.post(
+        f"/advances/{request_id}/approve",
+        data={"csrf_token": token, "installment_count": "12"},
+        follow_redirects=False,
+    )
+    assert approved.status_code == 303
+
+    with client.test_session_factory() as db:
+        request = db.get(AdvanceRequest, request_id)
+        rows = db.scalars(
+            select(AdvanceInstallment).where(
+                AdvanceInstallment.advance_request_id == request_id
+            )
+        ).all()
+        assert request.status == "approved"
+        assert len(rows) == 1
+        assert rows[0].installment_number == 1
+
+def test_duplicate_advance_form_submission_key_creates_only_one_request(advance_client):
+    client = advance_client
+    login(client)
+    token = csrf(client.get("/advances"))
+    submission_key = "a1b2c3d4" * 4
+
+    first = submit_advance(
+        client, token, amount="1000.00", advance_type="installment",
+        submission_key=submission_key,
+    )
+    duplicate = submit_advance(
+        client, token, amount="1000.00", advance_type="installment",
+        submission_key=submission_key,
+    )
+    assert first.status_code == 303
+    assert duplicate.status_code == 303
+
+    with client.test_session_factory() as db:
+        requests = db.scalars(select(AdvanceRequest)).all()
+        submitted_actions = db.scalars(
+            select(AuditLog).where(AuditLog.action == "advance_requested")
+        ).all()
+        idempotency_records = db.scalars(
+            select(AuditLog).where(AuditLog.action == "advance_submission_accepted")
+        ).all()
+        assert len(requests) == 1
+        assert len(submitted_actions) == 1
+        assert len(idempotency_records) == 1
+        assert idempotency_records[0].new_value == str(requests[0].id)
+
+def test_duplicate_approval_rejection_and_payment_posts_do_not_duplicate_actions(advance_client):
+    client = advance_client
+    login(client)
+    token = csrf(client.get("/advances"))
+
+    # Use installment advances so these requests do not consume the regular cap.
+    for amount in ("1000.00", "1100.00"):
+        assert submit_advance(
+            client, token, amount=amount, advance_type="installment"
+        ).status_code == 303
+
+    with client.test_session_factory() as db:
+        request_ids = db.scalars(
+            select(AdvanceRequest.id).order_by(AdvanceRequest.id)
+        ).all()
+
+    approve_url = f"/advances/{request_ids[0]}/approve"
+    approve_data = {"csrf_token": token, "installment_count": "3"}
+    assert client.post(approve_url, data=approve_data, follow_redirects=False).status_code == 303
+    duplicate_approval = client.post(
+        approve_url, data=approve_data, follow_redirects=False
+    )
+    assert duplicate_approval.status_code == 303
+    assert "error=approve" in duplicate_approval.headers["location"]
+
+    paid_url = f"/advances/{request_ids[0]}/paid"
+    assert client.post(
+        paid_url, data={"csrf_token": token}, follow_redirects=False
+    ).status_code == 303
+    duplicate_payment = client.post(
+        paid_url, data={"csrf_token": token}, follow_redirects=False
+    )
+    assert duplicate_payment.status_code == 303
+    assert "error=paid" in duplicate_payment.headers["location"]
+
+    reject_url = f"/advances/{request_ids[1]}/reject"
+    reject_data = {"csrf_token": token, "reason": "Synthetic rejection"}
+    assert client.post(
+        reject_url, data=reject_data, follow_redirects=False
+    ).status_code == 303
+    duplicate_rejection = client.post(
+        reject_url, data=reject_data, follow_redirects=False
+    )
+    assert duplicate_rejection.status_code == 303
+    assert "error=reject" in duplicate_rejection.headers["location"]
+
+    with client.test_session_factory() as db:
+        requests = db.scalars(
+            select(AdvanceRequest).order_by(AdvanceRequest.id)
+        ).all()
+        assert [item.status for item in requests] == ["paid", "rejected"]
+        for action in ("advance_approved", "advance_paid", "advance_rejected"):
+            assert len(db.scalars(
+                select(AuditLog).where(AuditLog.action == action)
+            ).all()) == 1
+        assert len(db.scalars(
+            select(AdvanceInstallment).where(
+                AdvanceInstallment.advance_request_id == request_ids[0]
+            )
+        ).all()) == 3
+

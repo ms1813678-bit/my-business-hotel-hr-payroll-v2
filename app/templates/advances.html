@@ -2,6 +2,7 @@
 {% set active_nav = "advances" %}
 {% block title %}السلف | M.Y. Business Hotel{% endblock %}
 {% block content %}
+{% set state_labels = {"pending": "معلقة", "approved": "معتمدة", "paid": "مصروفة", "rejected": "مرفوضة"} %}
 <header class="topbar">
     <div><p class="eyebrow">M.Y. BUSINESS HOTEL</p><h1>إدارة السلف</h1>
       <p class="muted">Salary advances · HR administrator only</p></div>
@@ -22,6 +23,7 @@
     <h2>تسجيل طلب سلفة / New advance request</h2>
     <p class="muted">تُقبل الطلبات من يوم 15 إلى يوم 22 من الشهر فقط. السلفة الشهرية العادية فقط تخضع لحد 25% من الراتب الأساسي. السلفة المقسطة مستقلة عن هذا الحد ويمكن أن تتجاوز الراتب الشهري، ويحدد جدولها عدد الأقساط. شهر الاستحقاق المحاسبي هو شهر الطلب، ويُدفع الراتب في اليوم الخامس من الشهر التالي.</p>
     <form method="post" action="/advances">
+      <input type="hidden" name="submission_key" value="{{ submission_key }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="form-grid">
         <label>الموظف / Employee
@@ -76,11 +78,11 @@
       <td>{{ "%.2f"|format(a.salary_basis) }} ج</td>
       <td>{% if a.advance_type == "installment" %}غير مطبق{% else %}{{ "%.2f"|format(a.salary_basis * 25 / 100) }} ج{% endif %}</td>
       <td>{{ a.payroll_month.strftime("%m/%Y") }}</td>
-      <td>{{ a.status }}</td>
+      <td>{{ state_labels.get(a.status, a.status) }}</td>
       <td>
         {% if a.status == "pending" %}
         <form method="post" action="/advances/{{ a.id }}/approve" class="inline-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>الأقساط <input type="number" name="installment_count" min="1" max="36" value="1" required></label><button type="submit">اعتماد</button>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% if a.advance_type == "regular" %}<input type="hidden" name="installment_count" value="1">{% else %}<label>الأقساط <input type="number" name="installment_count" min="1" max="36" value="1" required></label>{% endif %}<button type="submit">اعتماد</button>
         </form>
         <form method="post" action="/advances/{{ a.id }}/reject" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input name="reason" placeholder="سبب الرفض" required><button type="submit">رفض</button>
@@ -92,11 +94,37 @@
         {% endif %}
       </td>
     </tr>
-    <tr><td colspan="8"><span class="muted">السبب: {{ a.reason }}{% if a.rejection_reason %} · سبب الرفض: {{ a.rejection_reason }}{% endif %}</span></td></tr>
-    {% else %}<tr><td colspan="8">لا توجد طلبات سلف مسجلة.</td></tr>{% endfor %}
+    <tr><td colspan="9"><span class="muted">السبب: {{ a.reason }}{% if a.rejection_reason %} · سبب الرفض: {{ a.rejection_reason }}{% endif %}</span></td></tr>
+    {% else %}<tr><td colspan="9">لا توجد طلبات سلف مسجلة.</td></tr>{% endfor %}
     </tbody></table></div>
   </section>
   <section class="notice">
     <p><strong>ملاحظة:</strong> ملخص السلف يفصل بين الرصيد العادي والرصيد المقسط. الـ25% يطبق على السلفة الشهرية العادية فقط. السلفة المقسطة لا تخضع له، ويمكن أن تتجاوز الراتب، وخصمها يتم حسب جدول الأقساط. هذه الوحدة تسجل السلفة واعتمادها وصرفها وجدول الأقساط والشهر المستحق لكل خصم. الخصم الفعلي لا يُسجل كمخصوم إلا عند إغلاق دورة الرواتب، ويمكن عكسه عند إعادة فتح الدورة.</p>
   </section>
+<script>
+(() => {
+  document.querySelectorAll("form").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      const dateInput = form.querySelector('input[name="request_date"]');
+      if (dateInput && dateInput.value) {
+        const day = Number(dateInput.value.split("-")[2]);
+        if (!Number.isInteger(day) || day < 15 || day > 22) {
+          event.preventDefault();
+          window.alert("يجب أن يكون تاريخ طلب السلفة من يوم 15 إلى يوم 22 من الشهر.");
+          dateInput.focus();
+          return;
+        }
+      }
+      if (form.dataset.submitting === "true") {
+        event.preventDefault();
+        return;
+      }
+      form.dataset.submitting = "true";
+      form.querySelectorAll('button[type="submit"], button:not([type]), input[type="submit"]').forEach((button) => {
+        button.disabled = true;
+      });
+    });
+  });
+})();
+</script>
 {% endblock %}

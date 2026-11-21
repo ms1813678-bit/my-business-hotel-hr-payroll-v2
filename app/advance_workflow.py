@@ -60,6 +60,7 @@ def create_advance(
     reason: str,
     advance_type: str,
     actor: str,
+    submission_key: str | None = None,
 ) -> AdvanceRequest:
     if request_date.day < 15 or request_date.day > 22:
         raise ValueError("Advance requests are allowed only from day 15 through day 22.")
@@ -78,6 +79,27 @@ def create_advance(
     )
     if employee is None or employee.status != "active":
         raise ValueError("The employee is not active.")
+    if submission_key is not None:
+        submission_key = submission_key.strip()
+        if len(submission_key) < 32 or len(submission_key) > 80:
+            raise ValueError("Invalid advance submission key.")
+        previous_submission = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "advance_submission_accepted",
+                AuditLog.entity_type == "advance_submission",
+                AuditLog.entity_id == submission_key,
+            ).limit(1)
+        )
+        if previous_submission is not None:
+            try:
+                previous_request_id = int(previous_submission.new_value or "")
+            except ValueError as exc:
+                raise ValueError("The previous advance submission record is invalid.") from exc
+            previous_request = db.get(AdvanceRequest, previous_request_id)
+            if previous_request is None:
+                raise ValueError("The previous advance submission no longer exists.")
+            return previous_request
+
     salary = Decimal(str(employee.basic_salary))
     if salary <= 0:
         raise ValueError("The employee must have a positive basic salary.")
@@ -109,6 +131,16 @@ def create_advance(
         old="", new=f"{amount}|{payroll_month.isoformat()}",
         reason=reason.strip(),
     )
+    if submission_key is not None:
+        db.add(AuditLog(
+            actor=actor,
+            action="advance_submission_accepted",
+            entity_type="advance_submission",
+            entity_id=submission_key,
+            old_value=None,
+            new_value=str(request.id),
+            reason="Idempotency key for the advance request form.",
+        ))
     return request
 
 

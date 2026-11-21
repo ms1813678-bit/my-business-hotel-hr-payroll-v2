@@ -74,7 +74,7 @@
       <td>{% if a.advance_type == "installment" %}مقسطة{% else %}عادية{% endif %}</td>
       <td>{{ "%.2f"|format(a.amount) }} ج</td>
       <td>{{ "%.2f"|format(a.salary_basis) }} ج</td>
-      <td>{% if a.advance_type == "installment" %}غير مطبق{% else %}{{ "%.2f"|format(a.salary_basis * 0.25) }} ج{% endif %}</td>
+      <td>{% if a.advance_type == "installment" %}غير مطبق{% else %}{{ "%.2f"|format(a.salary_basis * 25 / 100) }} ج{% endif %}</td>
       <td>{{ a.payroll_month.strftime("%m/%Y") }}</td>
       <td>{{ a.status }}</td>
       <td>

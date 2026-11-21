@@ -1610,6 +1610,19 @@ def advances_page(request: Request, admin: AdminAccount = Depends(get_current_ad
                 "limit": cap,
                 "available": max(Decimal("0.00"), cap - regular_outstanding),
             }
+        for employee in employees:
+            if advance_summary.get(employee.id) is None:
+                default_limit = Decimal(str(employee.basic_salary)) * Decimal("0.25")
+                advance_summary[employee.id] = {
+                    "latest": None,
+                    "total": Decimal("0.00"),
+                    "deducted": Decimal("0.00"),
+                    "outstanding": Decimal("0.00"),
+                    "regular_outstanding": Decimal("0.00"),
+                    "installment_outstanding": Decimal("0.00"),
+                    "limit": default_limit,
+                    "available": default_limit,
+                }
         return templates.TemplateResponse(
             request=request,
             name="advances.html",
@@ -1620,6 +1633,7 @@ def advances_page(request: Request, admin: AdminAccount = Depends(get_current_ad
                 "employee_names": {e.id: e.full_name for e in all_employees},
                 "employee_codes": {e.id: e.code for e in all_employees},
                 "today": date.today().isoformat(),
+                "submission_key": uuid4().hex,
                 "csrf_token": get_csrf_token(request),
                 "error": request.query_params.get("error"),
             },
@@ -1633,6 +1647,7 @@ def create_advance_request(
     amount: Decimal = Form(...),
     advance_type: str = Form("regular"),
     reason: str = Form(...),
+    submission_key: str = Form(..., min_length=32, max_length=80),
     admin: AdminAccount = Depends(get_current_admin),
 ):
     try:
@@ -1645,6 +1660,7 @@ def create_advance_request(
                 reason=reason,
                 advance_type=advance_type,
                 actor=admin.username,
+                submission_key=submission_key,
             )
     except (ValueError, SQLAlchemyError):
         return RedirectResponse("/advances?error=request", status_code=303)
@@ -1666,7 +1682,8 @@ def approve_advance_request(
             )
             if request is None:
                 return RedirectResponse("/advances?error=record", status_code=303)
-            approve_advance(db, request, admin.username, installment_count=installment_count)
+            approval_installment_count = 1 if request.advance_type == "regular" else installment_count
+            approve_advance(db, request, admin.username, installment_count=approval_installment_count)
     except (ValueError, SQLAlchemyError):
         return RedirectResponse("/advances?error=approve", status_code=303)
     return RedirectResponse("/advances", status_code=303)
